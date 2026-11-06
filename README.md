@@ -87,6 +87,23 @@ ship:
 
 [`references/config.md`](skills/factory-orchestrator/references/config.md) documents every key. Stages hand off to each other in the format in [`references/handoff.md`](skills/factory-orchestrator/references/handoff.md).
 
+## Background
+
+This factory builds on two other repos.
+
+[ErikBean/research](https://github.com/ErikBean/research) holds the research behind these projects, as an OKF knowledge bundle. The factory follows its rule for how research and requirements relate: research and its reasoning live in the research repo, requirements live as OpenSpec specs in each project's repo, and specs cite the research by GitHub URL. The topics most relevant here:
+
+- [AWS agent guardrails](https://github.com/ErikBean/research/blob/main/knowledge/tech/aws-agent-guardrails/index.md): what actually stops spending, contains mistakes and limits an agent's permissions in an AWS account. It covers CDK's bootstrap roles and permissions boundaries, SCPs, and what Claude Code's permission rules and sandbox can and can't enforce.
+- [AWS web hosting](https://github.com/ErikBean/research/blob/main/knowledge/tech/aws-web-hosting/index.md): hosts, limits and costs for small apps on AWS, including how the CDK CLI behaves when an agent drives it.
+
+[ErikBean/aws-agent-bootstrap](https://github.com/ErikBean/aws-agent-bootstrap) holds the specs and code for an AWS account that AI coding agents can work in safely. Its [decisions](https://github.com/ErikBean/research/blob/main/knowledge/projects/aws-agent-bootstrap/index.md) are:
+
+- Agents work in a dedicated member account, not the management account.
+- CDK deploys run under a permissions boundary that every role they create must also carry, backed by an SCP.
+- The builder role can't create IAM roles directly, and can only pass roles under `/agent/` to Lambda.
+
+This is background for any factory run that deploys to AWS. The factory's own stages don't deploy anything.
+
 ## Status
 
 This is an early version and hasn't run end to end yet. Expect the skills to change as real runs show what's missing.
