@@ -46,6 +46,7 @@ Copy the folders in `skills/` to wherever your agent reads skills from. The skil
 - A TypeScript AWS CDK app, OpenSpec and a `factory.config.yaml`.
 - CI that typechecks, tests and runs `cdk synth` on every pull request.
 - A GitHub Actions workflow that runs `cdk deploy` to production on every merge to `main`.
+- A ruleset on `main`, so changes only land through a pull request that passed CI.
 - An AWS deploy role that GitHub Actions assumes through OIDC, so no AWS keys are stored in GitHub. Only the repo's `main` branch can assume it, and it can only assume CDK's bootstrap roles.
 
 It shows you the plan and waits for your yes before it creates anything on GitHub or AWS.

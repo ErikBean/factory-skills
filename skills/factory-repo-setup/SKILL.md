@@ -22,6 +22,7 @@ This skill creates a GitHub repo and AWS resources. Get the human's yes on the p
 | AWS | The GitHub OIDC identity provider, unless the account already has one |
 | AWS | A deploy role that only this repo's `main` branch can assume, and that can only assume the CDK bootstrap roles |
 | GitHub | Repo variables `AWS_DEPLOY_ROLE_ARN` and `AWS_REGION` |
+| GitHub | A ruleset on `main`: changes only through a pull request whose `test` check passed |
 
 The templates are in [templates/](templates/).
 
@@ -57,6 +58,7 @@ Auth:        GitHub OIDC; role github-deploy-<name> trusts <subject claim>
 AWS changes: create stack github-deploy-<name> (deploy role[, OIDC provider])
              [bootstrap CDK in <region>]
 First run:   pushing the initial commit deploys the empty starter stack
+Protection:  ruleset on main: pull request with a passing `test` check
 ```
 
 ## Step 4: Scaffold the repo locally
@@ -121,7 +123,7 @@ Build the OIDC subject claim the role will trust:
 
 ## Step 8: Protect main
 
-Offer to add a ruleset so that changes reach `main` only through a pull request whose `test` check has passed. Without one, a direct push to `main` deploys without review.
+Add a ruleset so that changes reach `main` only through a pull request whose `test` check has passed. This step is required: without it, a direct push or a failing PR can deploy to production.
 
 ```bash
 gh api -X POST repos/<owner>/<name>/rulesets --input - <<'JSON'
@@ -146,8 +148,10 @@ gh api -X POST repos/<owner>/<name>/rulesets --input - <<'JSON'
 JSON
 ```
 
-GitHub's free plan doesn't enforce rulesets on private repos, and the call fails if the plan doesn't support them. If it fails, tell the human that `main` is unprotected, and that the options are making the repo public or upgrading the plan.
+Then check it took effect: `gh api repos/<owner>/<name>/rules/branches/main` must list `pull_request` and `required_status_checks`.
+
+GitHub's free plan doesn't enforce rulesets on private repos, so the call can fail there. If it fails, the setup isn't finished. Stop and tell the human `main` is unprotected, and give them the options: make the repo public, or upgrade the plan. Until it's fixed, consider disabling the deploy workflow with `gh workflow disable deploy.yml --repo <owner>/<name>`.
 
 ## Step 9: Report
 
-Tell the human the repo URL, the first deploy run's URL and result, the role ARN, and whether `main` is protected. Then tell them the next step: run the factory in the new repo, and merge its PR to deploy.
+Tell the human the repo URL, the first deploy run's URL and result, the role ARN, and that `main` is protected. Then tell them the next step: run the factory in the new repo, and merge its PR to deploy.
