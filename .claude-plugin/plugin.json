@@ -1,0 +1,8 @@
+{
+  "name": "factory-skills",
+  "version": "0.1.0",
+  "description": "Agent skills for a multi-agent software factory: an orchestrator plus one sub agent per stage, defaulting to OpenSpec and red-green TDD.",
+  "author": { "name": "Erik Bean" },
+  "repository": "https://github.com/ErikBean/factory-skills",
+  "keywords": ["skills", "agents", "openspec", "tdd", "orchestration"]
+}

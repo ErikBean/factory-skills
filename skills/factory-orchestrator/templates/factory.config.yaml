@@ -1,0 +1,27 @@
+# Factory config. Every key is optional; these are the defaults.
+# See skills/factory-orchestrator/references/config.md in factory-skills.
+
+workflow:
+  spec: openspec        # openspec | none
+  tests: red-green      # red-green | tests-with-code | none
+
+tdd:
+  batch: group          # group | task | change
+
+confirm:
+  before_build: true
+  after_spec: true
+  before_ship: true
+
+commands:
+  test: ""
+  lint: ""
+  typecheck: ""
+
+review:
+  max_rounds: 2
+
+ship:
+  mode: pr              # pr | commit | none
+  branch_prefix: factory/
+  archive: true
