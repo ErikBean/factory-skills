@@ -45,11 +45,12 @@ for dir in "$src"/skills/factory-*/; do
   names+=("\"$name\"")
 done
 
+list="$(IFS=,; echo "${names[*]}")"
 cat > "$root/.agents/factory-skills.json" <<JSON
 {
   "source": "$remote",
   "commit": "$commit",
-  "skills": [$(IFS=,; echo "${names[*]}" | sed 's/,/, /g')]
+  "skills": [${list//,/, }]
 }
 JSON
 

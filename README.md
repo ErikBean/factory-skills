@@ -109,6 +109,15 @@ ship:
 
 [`references/config.md`](skills/factory-orchestrator/references/config.md) documents every key. Stages hand off to each other in the format in [`references/handoff.md`](skills/factory-orchestrator/references/handoff.md).
 
+## Develop
+
+`scripts/check.sh` lints the `factory-repo-setup` templates with shellcheck, `node --check`, cfn-lint and actionlint, and runs the tests in `tests/`. CI runs it on every pull request, and `main` only takes changes through a pull request that passed it. It needs `node` on the PATH, plus the linters pinned in `tests/requirements.txt`:
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -r tests/requirements.txt
+PATH="$PWD/.venv/bin:$PATH" scripts/check.sh
+```
+
 ## Status
 
 This is an early version and hasn't run end to end yet. Expect the skills to change as real runs show what's missing.
