@@ -41,13 +41,14 @@ Copy the folders in `skills/` to wherever your agent reads skills from. The skil
 
 ## Start a new project
 
-[`factory-repo-setup`](skills/factory-repo-setup/SKILL.md) is the skill to invoke first. Ask for it by name to set up a new repo:
+[`factory-repo-setup`](skills/factory-repo-setup/SKILL.md) is the skill to invoke first. Ask for it by name to set up a new repo, or one with little in it yet:
 
 - A TypeScript AWS CDK app, OpenSpec and a `factory.config.yaml`.
-- CI that typechecks, tests and runs `cdk synth` on every pull request.
+- CI that typechecks, tests and runs `cdk synth` on every pull request, and fails if any IAM role the app creates has no permissions boundary.
 - A GitHub Actions workflow that runs `cdk deploy` to production on every merge to `main`.
 - A ruleset on `main`, so changes only land through a pull request that passed CI.
 - An AWS deploy role that GitHub Actions assumes through OIDC, so no AWS keys are stored in GitHub. Only the repo's `main` branch can assume it, and it can only assume CDK's bootstrap roles.
+- The AWS account's permissions boundary on every role: the deploy role, and every role the app creates. The skill won't deploy to an account whose CDK bootstrap has no boundary.
 
 It shows you the plan and waits for your yes before it creates anything on GitHub or AWS.
 

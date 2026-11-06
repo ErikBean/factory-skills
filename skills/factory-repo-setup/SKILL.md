@@ -1,26 +1,26 @@
 ---
 name: factory-repo-setup
-description: Sets up a new GitHub repo for the software factory, with a TypeScript AWS CDK app, OpenSpec, a factory config, CI on pull requests, and a GitHub Actions workflow that runs cdk deploy to production on every merge to main. Creates the AWS role that workflow deploys with, using GitHub OIDC rather than stored keys. Use only when the human asks to set up a new repo for the factory or for deploy-on-merge.
+description: Sets up a GitHub repo for the software factory, with a TypeScript AWS CDK app, OpenSpec, a factory config, CI on pull requests, and a GitHub Actions workflow that runs cdk deploy to production on every merge to main. Creates the AWS role that workflow deploys with, using GitHub OIDC rather than stored keys, under the account's permissions boundary. Works on a new repo or one with little in it yet. Use only when the human asks to set up a repo for the factory or for deploy-on-merge.
 ---
 
 # Factory repo setup
 
-You set up a repo so the factory can build in it and every merge to `main` deploys to production. Run this once per repo, before the first factory run. Afterwards the flow is: the factory opens a PR, the human merges it, and GitHub Actions runs `cdk deploy`.
+You set up a repo so the factory can build in it and every merge to `main` deploys to production. Run this once per repo, before the first factory run. Afterwards the flow is: the factory opens a PR, CI checks it, the human merges it, and GitHub Actions runs `cdk deploy`.
 
-This skill creates a GitHub repo and AWS resources. Get the human's yes on the plan before anything outside the local machine changes.
+This skill changes GitHub and AWS. Get the human's yes on the plan before anything outside the local machine changes.
 
 ## What it sets up
 
 | Where | What |
 | --- | --- |
-| Repo | A TypeScript CDK app from `cdk init`, with Jest tests |
-| Repo | `openspec/` from `openspec init`, with project context saying merges deploy to production |
+| Repo | A TypeScript CDK app from `cdk init`, with Jest tests, every resource tagged with the project name, and every IAM role carrying the account's permissions boundary |
+| Repo | `openspec/` from `openspec init`, with project context covering deploys, the boundary and retained resources |
 | Repo | `factory.config.yaml` with the repo's test and typecheck commands |
-| Repo | `.github/workflows/ci.yml`: typecheck, tests and `cdk synth` on every pull request |
+| Repo | `.github/workflows/ci.yml`: typecheck, tests, `cdk synth` and a check that every synthesized IAM role has a boundary, on every pull request |
 | Repo | `.github/workflows/deploy.yml`: the CI checks, then `cdk deploy --all` on every push to `main` |
 | Repo | `.github/aws/github-deploy-role.yaml`: the CloudFormation template for the deploy role |
 | AWS | The GitHub OIDC identity provider, unless the account already has one |
-| AWS | A deploy role that only this repo's `main` branch can assume, and that can only assume the CDK bootstrap roles |
+| AWS | A deploy role that only this repo's `main` branch can assume, that can only assume the CDK bootstrap roles, and that carries the account's boundary |
 | GitHub | Repo variables `AWS_DEPLOY_ROLE_ARN` and `AWS_REGION` |
 | GitHub | A ruleset on `main`: changes only through a pull request whose `test` check passed |
 
@@ -30,44 +30,69 @@ The templates are in [templates/](templates/).
 
 Ask for anything the human hasn't given you:
 
-- The repo owner and name, and whether it's private or public.
-- The AWS account ID and Region to deploy to, and the AWS CLI profile to set up with. The profile needs rights to create IAM roles and CloudFormation stacks, and is used only during setup.
+- The repo owner and name. Whether the repo exists already, and if not, whether it should be private or public.
+- The AWS account ID and Region to deploy to, and the AWS CLI profile to set up with. The profile needs rights to create IAM roles and CloudFormation stacks in that account, and is used only during setup.
 - Which agent tools to set OpenSpec up for, as `openspec init --tools` takes them.
 
 Check the tools work: `gh auth status`, `aws sts get-caller-identity --profile <profile>`, `node --version` (OpenSpec needs 22.12 or later), `npx --version` and `openspec --version`. The account in the caller identity must match the account the human named. If it doesn't, stop.
 
+If the repo exists, read it. This skill adds a CDK app at the repo root, so it fits a repo that holds little more than a README and a `.gitignore`. If the repo already has an app, stop and ask the human how the CDK app should fit in.
+
 ## Step 2: Check the AWS account
 
-All of these are read-only:
+All of these are read-only.
 
-- **CDK bootstrap.** `aws cloudformation describe-stacks --stack-name CDKToolkit --region <region> --profile <profile>`. If the stack exists, read its `Qualifier` parameter. If it was bootstrapped with a custom qualifier or permissions boundary, the CDK app must use them in `cdk.json`, through `@aws-cdk/core:bootstrapQualifier` and `@aws-cdk/core:permissionsBoundary`.
-- **OIDC provider.** `aws iam list-open-id-connect-providers --profile <profile>`. If one ends in `token.actions.githubusercontent.com`, set `CreateOidcProvider` to `false`. An account can only have one.
-- **Required boundary.** Ask whether the account requires a permissions boundary on new roles, for example through an SCP. If it does, pass its ARN as `PermissionsBoundaryArn`.
+**The permissions boundary.** Every role this setup creates, and every role the app's deploys create, must carry a permissions boundary that stops deploys from creating roles more powerful than intended. Read the bootstrap stack:
 
-If the account isn't bootstrapped, include bootstrapping in the plan. By default `cdk bootstrap` gives its CloudFormation execution role `AdministratorAccess`, which means every deploy from `main` can change anything in the account. Ask whether to narrow it with `--cloudformation-execution-policies` or a custom permissions boundary.
+```bash
+aws cloudformation describe-stacks --stack-name CDKToolkit --region <region> --profile <profile> \
+  --query "Stacks[0].Parameters"
+```
+
+- **Bootstrapped with `InputPermissionsBoundary` set and `ApplyPermissionsBoundaryToAllRoles` true:** that policy is the boundary. Use its name everywhere below. Note the `Qualifier` too.
+- **Bootstrapped with no boundary, or with the boundary on the execution role only:** every deploy from `main` can do anything the bootstrap roles can, which by default is `AdministratorAccess`. Stop and tell the human. The account needs a boundary policy and a re-bootstrap with `--custom-permissions-boundary <name> --apply-permissions-boundary-to-all-roles` before this repo deploys to it. Narrowing `--cloudformation-execution-policies` instead isn't enough, because a deploy can still create a role with no boundary.
+- **Not bootstrapped:** ask whether code elsewhere owns this account's setup, such as an account bootstrap repo. If it does, the bootstrap belongs there, so stop. If not, add to the plan: create a boundary policy, starting from CDK's example (`cdk bootstrap --show-template` contains it), then bootstrap with `--custom-permissions-boundary <name> --apply-permissions-boundary-to-all-roles`. Never bootstrap with CDK's defaults.
+
+**The OIDC provider.** `aws iam list-open-id-connect-providers --profile <profile>`. If one ends in `token.actions.githubusercontent.com`, set `CreateOidcProvider` to `false`, since an account can only have one.
 
 ## Step 3: Confirm the plan
 
 Show the human the plan and wait for a yes:
 
 ```text
-Repo:        github.com/<owner>/<name> (private)
-App:         TypeScript CDK app, Node 24, tests with Jest
+Repo:        github.com/<owner>/<name> (new, private | existing)
+App:         TypeScript CDK app, Node 24, tests with Jest, tagged project=<name>
 Deploys:     every push to main runs `cdk deploy --all` to <account> in <region>
+Boundary:    <boundary name> on every role, checked in CI
 Auth:        GitHub OIDC; role github-deploy-<name> trusts <subject claim>
 AWS changes: create stack github-deploy-<name> (deploy role[, OIDC provider])
-             [bootstrap CDK in <region>]
-First run:   pushing the initial commit deploys the empty starter stack
+             [create the boundary and bootstrap CDK in <region>]
+First run:   pushing the setup commit deploys the empty starter stack
 Protection:  ruleset on main: pull request with a passing `test` check
 ```
 
 ## Step 4: Scaffold the repo locally
 
-1. Make an empty folder named after the repo and run `npx aws-cdk@latest init app --language typescript` in it. `cdk init` requires an empty folder, and it makes the first git commit.
+1. **Make the CDK app.** `cdk init` needs an empty folder, named after the app:
+   - **New repo:** make an empty folder named after the repo and run `npx aws-cdk@latest init app --language typescript` in it. It makes the first git commit.
+   - **Existing repo:** clone it. In an empty temporary folder with the repo's name, run the same `cdk init`. Copy everything except its `.git` into the clone. Merge the two `.gitignore` files, keeping every line from both. Keep the existing README for step 8.
 2. Write `.nvmrc` containing `24`.
-3. Run `openspec init --tools <tools>`. Add to `openspec/config.yaml`'s `context`: "Merging to main deploys to production through `.github/workflows/deploy.yml`. Every change must leave `npm test` and `npx cdk synth` passing."
-4. Copy `templates/workflows/ci.yml` and `templates/workflows/deploy.yml` to `.github/workflows/`, and `templates/github-deploy-role.yaml` to `.github/aws/`.
-5. Write `factory.config.yaml`:
+3. **Set the boundary for the whole app.** In `cdk.json`, add to `context`:
+
+   ```json
+   "@aws-cdk/core:permissionsBoundary": { "name": "<boundary name>" }
+   ```
+
+   If the account uses a custom qualifier, also add `"@aws-cdk/core:bootstrapQualifier": "<qualifier>"`.
+4. **Tag everything.** In `bin/<name>.ts`, import `Tags` from `aws-cdk-lib` and add `Tags.of(app).add("project", "<name>");` after the app is created. This lets leftovers be traced back to the repo.
+5. Copy these templates:
+   - `templates/workflows/ci.yml` and `templates/workflows/deploy.yml` to `.github/workflows/`
+   - `templates/github-deploy-role.yaml` to `.github/aws/`
+   - `templates/check-role-boundaries.mjs` to `scripts/`
+6. **Set up OpenSpec.** Run `openspec init --tools <tools>`. Then add to the `context` in `openspec/config.yaml`:
+
+   > Merging to main deploys to production through `.github/workflows/deploy.yml`. Every change must leave `npm test`, `npx cdk synth` and `node scripts/check-role-boundaries.mjs` passing. Every IAM role must carry the `<boundary name>` permissions boundary. The cdk.json context key sets it app-wide, but roles CDK creates for `AwsCustomResource` miss it (aws/aws-cdk#30179) and need `PermissionsBoundary.of(construct).apply(...)`. CDK keeps S3 buckets and DynamoDB tables when a stack is deleted unless they set a removal policy, so decide for each one whether its data must outlive the stack.
+7. Write `factory.config.yaml`:
 
    ```yaml
    commands:
@@ -75,13 +100,16 @@ Protection:  ruleset on main: pull request with a passing `test` check
      typecheck: npx tsc --noEmit
    ```
 
-6. Replace the README from `cdk init` with one saying what the repo is for, that merges to `main` deploy to production, and how the deploy role is set up, pointing to `.github/aws/github-deploy-role.yaml`.
-7. Run `npm test`, `npx tsc --noEmit` and `npx cdk synth --quiet`. All must pass before you go on.
-8. Commit: `Set up CDK app, OpenSpec and deploy-on-merge`.
+8. Write the README. For a new repo, replace the one from `cdk init`. For an existing repo, keep what's there and add to it. It should cover what the repo is for, that merges to `main` deploy to production, and how the deploy role is set up, pointing to `.github/aws/github-deploy-role.yaml`.
+9. Run `npm test`, `npx tsc --noEmit`, `npx cdk synth --quiet` and `node scripts/check-role-boundaries.mjs`. All must pass before you go on.
+10. Commit: `Set up CDK app, OpenSpec and deploy-on-merge`.
 
-## Step 5: Create the GitHub repo, without pushing
+## Step 5: Get the repo's IDs, without pushing
 
-Run `gh repo create <owner>/<name> --<private|public>`. Don't push yet. Pushing to `main` starts a deploy, and the deploy role doesn't exist yet.
+- **New repo:** run `gh repo create <owner>/<name> --<private|public>`.
+- **Existing repo:** it's already there.
+
+Don't push yet. Pushing to `main` starts a deploy, and the deploy role doesn't exist yet.
 
 Build the OIDC subject claim the role will trust:
 
@@ -91,17 +119,18 @@ Build the OIDC subject claim the role will trust:
 
 ## Step 6: Create the AWS side
 
-1. If the plan includes it, run `npx cdk bootstrap aws://<account>/<region> --profile <profile>`, with the options the human chose.
-2. Deploy the role:
+1. If the plan includes it, create the boundary and bootstrap CDK as agreed in step 2.
+2. Deploy the role, with the boundary's ARN:
 
    ```bash
    aws cloudformation deploy \
      --template-file .github/aws/github-deploy-role.yaml \
      --stack-name github-deploy-<name> \
      --capabilities CAPABILITY_NAMED_IAM \
+     --tags project=<name> \
      --parameter-overrides RoleName=github-deploy-<name> SubjectClaim=<claim> \
        CdkQualifier=<qualifier> CreateOidcProvider=<true|false> \
-       PermissionsBoundaryArn=<arn or empty> \
+       PermissionsBoundaryArn=arn:aws:iam::<account>:policy/<boundary name> \
      --region <region> --profile <profile>
    ```
 
@@ -116,10 +145,11 @@ Build the OIDC subject claim the role will trust:
    gh variable set AWS_REGION --repo <owner>/<name> --body <region>
    ```
 
-2. Add the remote, then push with `git push -u origin main`.
+2. Push. For a new repo, add the remote first. Then run `git push -u origin main`.
 3. Watch the first deploy: `gh run list --repo <owner>/<name> --workflow deploy.yml --limit 1`, then `gh run watch <run-id> --repo <owner>/<name>`.
    - If it fails at `configure-aws-credentials` with "Not authorized to perform sts:AssumeRoleWithWebIdentity", the subject claim is wrong. Check the claim format from step 5, update the stack, and rerun the workflow with `gh run rerun <run-id> --failed`.
    - If `cdk deploy` fails to assume a `cdk-*` role, check the qualifier and bootstrap Region.
+   - If it fails creating a role with an access-denied error, that role is missing the boundary. Find it with `scripts/check-role-boundaries.mjs` and bound it.
 
 ## Step 8: Protect main
 
@@ -150,8 +180,20 @@ JSON
 
 Then check it took effect: `gh api repos/<owner>/<name>/rules/branches/main` must list `pull_request` and `required_status_checks`.
 
-GitHub's free plan doesn't enforce rulesets on private repos, so the call can fail there. If it fails, the setup isn't finished. Stop and tell the human `main` is unprotected, and give them the options: make the repo public, or upgrade the plan. Until it's fixed, consider disabling the deploy workflow with `gh workflow disable deploy.yml --repo <owner>/<name>`.
+GitHub's free plan doesn't support rulesets on private repos, so the call fails there with "Upgrade to GitHub Pro or make this repository public". If that happens, the setup isn't finished. Stop and tell the human `main` is unprotected, and give them the options:
+
+- Make the repo public. With their yes, run `gh api -X PATCH repos/<owner>/<name> -f visibility=public`, then add the ruleset.
+- Upgrade the plan.
+
+Until it's fixed, consider disabling the deploy workflow with `gh workflow disable deploy.yml --repo <owner>/<name>`.
 
 ## Step 9: Report
 
-Tell the human the repo URL, the first deploy run's URL and result, the role ARN, and that `main` is protected. Then tell them the next step: run the factory in the new repo, and merge its PR to deploy.
+Tell the human:
+
+- The repo URL.
+- The first deploy run's URL and result.
+- The role ARN, and the boundary it carries.
+- That `main` is protected.
+
+Then tell them the next step: run the factory in the repo, and merge its PR to deploy.
