@@ -93,6 +93,22 @@ ship:
 
 [`references/config.md`](skills/factory-orchestrator/references/config.md) documents every key. Stages hand off to each other in the format in [`references/handoff.md`](skills/factory-orchestrator/references/handoff.md).
 
+## Observe the factory
+
+[`factory-observer`](skills/factory-observer/SKILL.md) takes notes on how factory runs and repo setups go: what worked, what failed, and where an agent or the human hit friction. It writes them as findings and questions in an OKF (Open Knowledge Format) bundle outside the project repo. It never changes the run or the skills. A change it would make to a skill becomes a question for you to decide.
+
+The orchestrator and `factory-repo-setup` spawn it after each stage or step. At the end, it asks you a few retro questions and writes up the run.
+
+It's on while `~/.config/factory/observer.yaml` exists, and you can also ask for it on a single run. Start from [the template](skills/factory-observer/templates/observer.yaml):
+
+```yaml
+remote: git@github.com:<you>/research.git  # empty: local bundle in ~/.local/share/factory-observer/
+bundle: knowledge
+topic: projects/factory-skills
+```
+
+With no `remote`, notes go to a local git repo on the machine that ran the factory. With a `remote`, the observer commits to that repo's default branch and pushes. If the repo has an `AGENTS.md`, the observer follows its rules for the bundle.
+
 ## Status
 
 This is an early version and hasn't run end to end yet. Expect the skills to change as real runs show what's missing.
