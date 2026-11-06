@@ -7,7 +7,7 @@ description: Runs a multi-agent software factory that takes a feature request th
 
 You run the factory. You are the only one who talks to the human. You don't write specs, tests or code yourself: you spawn one sub agent per stage, check its work, and decide what runs next.
 
-Run this skill in the main conversation, not in a sub agent. Sub agents can't spawn sub agents.
+Run this skill in the main conversation, not in a sub agent. In many runtimes, sub agents can't spawn sub agents.
 
 ## The stages
 
@@ -47,10 +47,7 @@ If `confirm.before_build` is false, print the plan and continue without waiting.
 
 ## Step 3: Run the stages
 
-Spawn each stage's agent:
-
-- **Claude Code:** the Agent tool with `subagent_type` set to the stage agent. It's `factory-skills:<agent>` when this repo is installed as a plugin, and `<agent>` when the agent files were copied into `.claude/agents/`.
-- **Other runtimes:** a general sub agent whose prompt starts with "Use the `<stage skill>` skill."
+Spawn each stage as a sub agent with your runtime's sub agent tool. Start its prompt with: "You are the `<agent>` in a software factory. Use the `<skill>` skill." If your runtime can't load skills by name, give it the path to the stage's `SKILL.md` to read first.
 
 Sub agents start with none of your context, so each prompt must carry everything the stage needs. That includes the stage name, the change id, the feature request as confirmed, the resolved config, the test command, the batch to work on, summaries of earlier handoffs, and any findings to fix. Paste in the handoff format from [references/handoff.md](references/handoff.md), which every stage ends its run with.
 
@@ -61,7 +58,7 @@ Run the stages in this order, one agent at a time:
    - If `confirm.after_spec`, show the human the change's paths, its requirements and scenarios, and its task groups, and wait for approval.
 2. **red, then green, for each batch.** `tdd.batch` sets the batch size: `group` (each numbered group in `tasks.md`), `task`, or `change`. If `workflow.tests` isn't `red-green`, skip red and tell the implementer to write tests along with the code.
 3. **review.** On blocking findings, spawn the implementer with the findings, then review again. After `review.max_rounds` rounds, stop and ask the human.
-4. **ship.** If `confirm.before_ship`, show the human what will be committed, archived and pushed, and wait for a yes. Tell the releaser in its prompt that the human approved.
+4. **ship.** If `confirm.before_ship`, show the human what will be committed, archived and pushed, and wait for a yes. If a workflow in `.github/workflows/` deploys on push to the default branch, tell the human that merging the PR deploys to production. Tell the releaser in its prompt that the human approved.
 
 ## Step 4: Check every handoff yourself
 

@@ -26,6 +26,7 @@ Your prompt from the orchestrator gives you the change id, the branch, the resol
      - What: the requirements added, modified or removed.
      - Tests: the number of tests and the scenarios they cover.
      - Review: the number of rounds, and any should-fix findings left open.
+     - Deploy: if a workflow in `.github/workflows/` deploys on push to the default branch, say that merging this PR deploys to production.
 
 Never force-push, and never push to the default branch.
 

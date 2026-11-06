@@ -32,4 +32,4 @@ Anything the next agent needs that isn't in the artifacts.
 - `blocked`: the stage can't finish for a reason the orchestrator might fix, such as a missing tool or a failing pre-existing test. Say what would unblock it.
 - `needs-human`: the stage needs a decision only the human can make. Put the decision in Questions.
 
-Stage agents never ask the human directly, and never guess at decisions that change what gets built.
+Stage agents never ask the human directly, and never guess at decisions that change what gets built. The handoff is a stage's last message, with nothing after it.

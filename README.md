@@ -23,30 +23,34 @@ you ── request ──► factory-orchestrator ── shows the flow, waits f
 | review | `reviewer` | [`factory-reviewer`](skills/factory-reviewer/SKILL.md) | Read-only review against the spec, the tests and the diff |
 | ship | `releaser` | [`factory-releaser`](skills/factory-releaser/SKILL.md) | Archives the OpenSpec change, then commits, pushes and opens a PR |
 
+Each stage runs as a sub agent with one role and one skill.
+
 The orchestrator itself is [`factory-orchestrator`](skills/factory-orchestrator/SKILL.md). It doesn't trust handoffs: after red it runs the tests to see them fail, and after green it checks they pass and that the red tests weren't edited.
 
 By default you're asked at three points: before the build, after the spec, and before ship.
 
 ## Install
 
-### As a Claude Code plugin
-
-```text
-/plugin marketplace add ErikBean/factory-skills
-/plugin install factory-skills@factory-skills
-```
-
-This installs the six skills and the five stage agents. Each agent preloads its stage's skill.
-
-### By copying
-
-Copy `skills/*` into your project's `.claude/skills/` and `agents/*` into `.claude/agents/`. The skills follow the [Agent Skills](https://agentskills.io) format, so you can also use them in other runtimes that support it. There, the orchestrator spawns a general sub agent and tells it which skill to use.
+Copy the folders in `skills/` to wherever your agent reads skills from. The skills follow the [Agent Skills](https://agentskills.io) format and don't depend on one agent runtime. The orchestrator spawns each stage with the runtime's own sub agent tool and tells it which skill to use.
 
 ### Prerequisites in the project being built
 
 - The OpenSpec CLI, set up with `openspec init`. The orchestrator offers to set it up if it's missing.
 - A test command the agents can run.
 - Git, plus `gh` if you ship as a PR.
+
+## Start a new project
+
+[`factory-repo-setup`](skills/factory-repo-setup/SKILL.md) is the skill to invoke first. Ask for it by name to set up a new repo:
+
+- A TypeScript AWS CDK app, OpenSpec and a `factory.config.yaml`.
+- CI that typechecks, tests and runs `cdk synth` on every pull request.
+- A GitHub Actions workflow that runs `cdk deploy` to production on every merge to `main`.
+- An AWS deploy role that GitHub Actions assumes through OIDC, so no AWS keys are stored in GitHub. Only the repo's `main` branch can assume it, and it can only assume CDK's bootstrap roles.
+
+It shows you the plan and waits for your yes before it creates anything on GitHub or AWS.
+
+After that, use the factory in the new repo. The factory opens a pull request, CI checks it, and merging it deploys to production.
 
 ## Use
 
@@ -86,23 +90,6 @@ ship:
 ```
 
 [`references/config.md`](skills/factory-orchestrator/references/config.md) documents every key. Stages hand off to each other in the format in [`references/handoff.md`](skills/factory-orchestrator/references/handoff.md).
-
-## Background
-
-This factory builds on two other repos.
-
-[ErikBean/research](https://github.com/ErikBean/research) holds the research behind these projects, as an OKF knowledge bundle. The factory follows its rule for how research and requirements relate: research and its reasoning live in the research repo, requirements live as OpenSpec specs in each project's repo, and specs cite the research by GitHub URL. The topics most relevant here:
-
-- [AWS agent guardrails](https://github.com/ErikBean/research/blob/main/knowledge/tech/aws-agent-guardrails/index.md): what actually stops spending, contains mistakes and limits an agent's permissions in an AWS account. It covers CDK's bootstrap roles and permissions boundaries, SCPs, and what Claude Code's permission rules and sandbox can and can't enforce.
-- [AWS web hosting](https://github.com/ErikBean/research/blob/main/knowledge/tech/aws-web-hosting/index.md): hosts, limits and costs for small apps on AWS, including how the CDK CLI behaves when an agent drives it.
-
-[ErikBean/aws-agent-bootstrap](https://github.com/ErikBean/aws-agent-bootstrap) holds the specs and code for an AWS account that AI coding agents can work in safely. Its [decisions](https://github.com/ErikBean/research/blob/main/knowledge/projects/aws-agent-bootstrap/index.md) are:
-
-- Agents work in a dedicated member account, not the management account.
-- CDK deploys run under a permissions boundary that every role they create must also carry, backed by an SCP.
-- The builder role can't create IAM roles directly, and can only pass roles under `/agent/` to Lambda.
-
-This is background for any factory run that deploys to AWS. The factory's own stages don't deploy anything.
 
 ## Status
 
