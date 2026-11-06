@@ -16,6 +16,7 @@ This skill changes GitHub and AWS. Get the human's yes on the plan before anythi
 | Repo | A TypeScript CDK app from `cdk init`, with Jest tests, every resource tagged with the project name, and every IAM role carrying the account's permissions boundary |
 | Repo | `openspec/` from `openspec init`, with project context covering deploys, the boundary and retained resources |
 | Repo | `factory.config.yaml` with the repo's test and typecheck commands |
+| Repo | The factory's stage skills in `.agents/skills/`, linked from `.claude/skills/`, pinned to a factory-skills commit in `.agents/factory-skills.json` |
 | Repo | `.github/workflows/ci.yml`: typecheck, tests, `cdk synth` and a check that every synthesized IAM role has a boundary, on every pull request |
 | Repo | `.github/workflows/deploy.yml`: the CI checks, then `cdk deploy --all` on every push to `main` |
 | Repo | `.github/aws/github-deploy-role.yaml`: the CloudFormation template for the deploy role |
@@ -63,6 +64,7 @@ Show the human the plan and wait for a yes:
 Repo:        github.com/<owner>/<name> (new, private | existing)
 App:         TypeScript CDK app, Node 24, tests with Jest, tagged project=<name>
 Deploys:     every push to main runs `cdk deploy --all` to <account> in <region>
+Skills:      factory stage skills copied in, pinned to factory-skills <short commit>
 Boundary:    <boundary name> on every role, checked in CI
 Auth:        GitHub OIDC; role github-deploy-<name> trusts <subject claim>
 AWS changes: create stack github-deploy-<name> (deploy role[, OIDC provider])
@@ -75,7 +77,7 @@ Protection:  ruleset on main: pull request with a passing `test` check
 
 1. **Make the CDK app.** `cdk init` needs an empty folder, named after the app:
    - **New repo:** make an empty folder named after the repo and run `npx aws-cdk@latest init app --language typescript` in it. It makes the first git commit.
-   - **Existing repo:** clone it. In an empty temporary folder with the repo's name, run the same `cdk init`. Copy everything except its `.git` into the clone. Merge the two `.gitignore` files, keeping every line from both. Keep the existing README for step 8.
+   - **Existing repo:** clone it. In an empty temporary folder with the repo's name, run the same `cdk init`. Copy everything except its `.git` into the clone. Merge the two `.gitignore` files, keeping every line from both. Keep the existing README for step 9.
 2. Write `.nvmrc` containing `24`.
 3. **Set the boundary for the whole app.** In `cdk.json`, add to `context`:
 
@@ -88,11 +90,12 @@ Protection:  ruleset on main: pull request with a passing `test` check
 5. Copy these templates:
    - `templates/workflows/ci.yml` and `templates/workflows/deploy.yml` to `.github/workflows/`
    - `templates/github-deploy-role.yaml` to `.github/aws/`
-   - `templates/check-role-boundaries.mjs` to `scripts/`
-6. **Set up OpenSpec.** Run `openspec init --tools <tools>`. Then add to the `context` in `openspec/config.yaml`:
+   - `templates/check-role-boundaries.mjs` and `templates/sync-factory-skills.sh` to `scripts/`, keeping the sync script executable
+6. **Copy in the factory's skills.** This way the repo's agents, CI, teammates and cloud sessions all run the same version of the factory, whatever is installed on their machine. Find the factory-skills checkout this skill was loaded from: resolve symlinks on this skill's folder, and the checkout is two levels up. If that folder isn't a git checkout, clone `https://github.com/ErikBean/factory-skills` into a temporary folder and use that. Then run `scripts/sync-factory-skills.sh <checkout>`. It refuses a checkout with uncommitted changes under `skills/`. If it does, tell the human and ask whether to commit them first or pin the last commit from a fresh clone.
+7. **Set up OpenSpec.** Run `openspec init --tools <tools>`. Then add to the `context` in `openspec/config.yaml`:
 
    > Merging to main deploys to production through `.github/workflows/deploy.yml`. Every change must leave `npm test`, `npx cdk synth` and `node scripts/check-role-boundaries.mjs` passing. Every IAM role must carry the `<boundary name>` permissions boundary. The cdk.json context key sets it app-wide, but roles CDK creates for `AwsCustomResource` miss it (aws/aws-cdk#30179) and need `PermissionsBoundary.of(construct).apply(...)`. CDK keeps S3 buckets and DynamoDB tables when a stack is deleted unless they set a removal policy, so decide for each one whether its data must outlive the stack.
-7. Write `factory.config.yaml`:
+8. Write `factory.config.yaml`:
 
    ```yaml
    commands:
@@ -100,9 +103,9 @@ Protection:  ruleset on main: pull request with a passing `test` check
      typecheck: npx tsc --noEmit
    ```
 
-8. Write the README. For a new repo, replace the one from `cdk init`. For an existing repo, keep what's there and add to it. It should cover what the repo is for, that merges to `main` deploy to production, and how the deploy role is set up, pointing to `.github/aws/github-deploy-role.yaml`.
-9. Run `npm test`, `npx tsc --noEmit`, `npx cdk synth --quiet` and `node scripts/check-role-boundaries.mjs`. All must pass before you go on.
-10. Commit: `Set up CDK app, OpenSpec and deploy-on-merge`.
+9. Write the README. For a new repo, replace the one from `cdk init`. For an existing repo, keep what's there and add to it. It should cover what the repo is for, that merges to `main` deploy to production, and how the deploy role is set up, pointing to `.github/aws/github-deploy-role.yaml`. Also say that the factory's skills are pinned in `.agents/skills/`, and that `scripts/sync-factory-skills.sh <factory-skills checkout>` updates them.
+10. Run `npm test`, `npx tsc --noEmit`, `npx cdk synth --quiet` and `node scripts/check-role-boundaries.mjs`. All must pass before you go on.
+11. Commit: `Set up CDK app, OpenSpec and deploy-on-merge`.
 
 ## Step 5: Get the repo's IDs, without pushing
 
@@ -194,6 +197,7 @@ Tell the human:
 - The repo URL.
 - The first deploy run's URL and result.
 - The role ARN, and the boundary it carries.
+- The factory-skills commit the repo's skills are pinned to.
 - That `main` is protected.
 
 Then tell them the next step: run the factory in the repo, and merge its PR to deploy.

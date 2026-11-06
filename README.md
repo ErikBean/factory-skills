@@ -31,7 +31,23 @@ By default you're asked at three points: before the build, after the spec, and b
 
 ## Install
 
-Copy the folders in `skills/` to wherever your agent reads skills from. The skills follow the [Agent Skills](https://agentskills.io) format and don't depend on one agent runtime. The orchestrator spawns each stage with the runtime's own sub agent tool and tells it which skill to use.
+The skills follow the [Agent Skills](https://agentskills.io) format and don't depend on one agent runtime. The orchestrator spawns each stage with the runtime's own sub agent tool and tells it which skill to use.
+
+There are two places to install them, and they work together:
+
+- **On your machine, for every project.** Link each folder in `skills/` into the shared `~/.agents/skills/` folder, and from there into your agent's folder, such as `~/.claude/skills/`. Link to a clone you keep on `main`, so edits and `git pull` take effect everywhere at once.
+
+  ```bash
+  for s in ~/path/to/factory-skills/skills/*/; do
+    n=$(basename "$s")
+    ln -s "${s%/}" ~/.agents/skills/"$n"
+    ln -s ../../.agents/skills/"$n" ~/.claude/skills/"$n"
+  done
+  ```
+
+- **In each project, pinned.** `factory-repo-setup` copies the stage skills into the project's `.agents/skills/`, links them from `.claude/skills/`, and records the factory-skills commit in `.agents/factory-skills.json`. CI, teammates and cloud sessions then run the version the project was built with. To move a project to a newer version, run `scripts/sync-factory-skills.sh <factory-skills checkout>` in it and commit the result.
+
+In Claude Code, skills in `~/.claude/skills/` take precedence over a project's skills with the same name. With both installed, your machine runs your linked copy and everyone else runs the pinned one.
 
 ### Prerequisites in the project being built
 
