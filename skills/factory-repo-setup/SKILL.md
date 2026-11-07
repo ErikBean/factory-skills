@@ -32,10 +32,12 @@ The templates are in [templates/](templates/).
 Ask for anything the human hasn't given you:
 
 - The repo owner and name. Whether the repo exists already, and if not, whether it should be private or public.
-- The AWS account ID and Region to deploy to, and the AWS CLI profile to set up with. The profile needs rights to create IAM roles and CloudFormation stacks in that account, and is used only during setup.
+- The AWS account ID and Region to deploy to.
+- Who will make the AWS changes in step 6. They need rights to create IAM roles and CloudFormation stacks in the account. If you're an agent, you should be signed in as an identity that can't do that, and the human shouldn't stay signed in as an admin while agents run. So by default you prepare the step 6 commands and the human runs them in their own terminal, with their own admin profile. Only run them yourself if the human says the profile you have is meant for this.
+- The AWS CLI profile to use for the read-only checks in steps 1 and 2. A read-only or builder profile in the target account is enough for most of them.
 - Which agent tools to set OpenSpec up for, as `openspec init --tools` takes them.
 
-Check the tools work: `gh auth status`, `aws sts get-caller-identity --profile <profile>`, `node --version` (OpenSpec needs 22.12 or later), `npx --version` and `openspec --version`. The account in the caller identity must match the account the human named. If it doesn't, stop.
+Check the tools work: `gh auth status`, `aws sts get-caller-identity --profile <profile>` with the read-only profile, `node --version` (OpenSpec needs 22.12 or later), `npx --version` and `openspec --version`. The account in the caller identity must match the account the human named. If it doesn't, stop.
 
 If the repo exists, read it. This skill adds a CDK app at the repo root, so it fits a repo that holds little more than a README and a `.gitignore`. If the repo already has an app, stop and ask the human how the CDK app should fit in.
 
@@ -54,7 +56,15 @@ aws cloudformation describe-stacks --stack-name CDKToolkit --region <region> --p
 - **Bootstrapped with no boundary, or with the boundary on the execution role only:** every deploy from `main` can do anything the bootstrap roles can, which by default is `AdministratorAccess`. Stop and tell the human. The account needs a boundary policy and a re-bootstrap with `--custom-permissions-boundary <name> --apply-permissions-boundary-to-all-roles` before this repo deploys to it. Narrowing `--cloudformation-execution-policies` instead isn't enough, because a deploy can still create a role with no boundary.
 - **Not bootstrapped:** ask whether code elsewhere owns this account's setup, such as an account bootstrap repo. If it does, the bootstrap belongs there, so stop. If not, add to the plan: create a boundary policy, starting from CDK's example (`cdk bootstrap --show-template` contains it), then bootstrap with `--custom-permissions-boundary <name> --apply-permissions-boundary-to-all-roles`. Never bootstrap with CDK's defaults.
 
-**The OIDC provider.** `aws iam list-open-id-connect-providers --profile <profile>`. If one ends in `token.actions.githubusercontent.com`, set `CreateOidcProvider` to `false`, since an account can only have one.
+**Not the management account.** Service control policies, resource control policies and budget actions don't restrict an organization's management account, so a repo that deploys there runs without those guardrails. Check:
+
+```bash
+aws organizations describe-organization --profile <profile> --query "Organization.MasterAccountId"
+```
+
+If it returns the target account ID, stop and tell the human to deploy to a member account instead. If the account isn't in an organization, the call fails with `AWSOrganizationsNotInUseException`; tell the human the account has no organization guardrails and ask whether to go on.
+
+**The OIDC provider.** `aws iam list-open-id-connect-providers --profile <profile>`. If one ends in `token.actions.githubusercontent.com`, set `CreateOidcProvider` to `false`, since an account can only have one. If the read-only profile can't list providers, ask the human to run this check.
 
 ## Step 3: Confirm the plan
 
@@ -67,7 +77,8 @@ Deploys:     every push to main runs `cdk deploy --all` to <account> in <region>
 Skills:      factory stage skills copied in, pinned to factory-skills <short commit>
 Boundary:    <boundary name> on every role, checked in CI
 Auth:        GitHub OIDC; role github-deploy-<name> trusts <subject claim>
-AWS changes: create stack github-deploy-<name> (deploy role[, OIDC provider])
+AWS changes: create stack github-deploy-<name> (deploy role[, OIDC provider]),
+             run by <you | the human, in their own terminal>
              [create the boundary and bootstrap CDK in <region>]
 First run:   pushing the setup commit deploys the empty starter stack
 Protection:  ruleset on main: pull request with a passing `test` check
@@ -94,7 +105,7 @@ Protection:  ruleset on main: pull request with a passing `test` check
 6. **Copy in the factory's skills.** This way the repo's agents, CI, teammates and cloud sessions all run the same version of the factory, whatever is installed on their machine. Find the factory-skills checkout this skill was loaded from: resolve symlinks on this skill's folder, and the checkout is two levels up. If that folder isn't a git checkout, clone `https://github.com/ErikBean/factory-skills` into a temporary folder and use that. Then run `scripts/sync-factory-skills.sh <checkout>`. It refuses a checkout with uncommitted changes under `skills/`. If it does, tell the human and ask whether to commit them first or pin the last commit from a fresh clone.
 7. **Set up OpenSpec.** Run `openspec init --tools <tools>`. Then add to the `context` in `openspec/config.yaml`:
 
-   > Merging to main deploys to production through `.github/workflows/deploy.yml`. Every change must leave `npm test`, `npx cdk synth` and `node scripts/check-role-boundaries.mjs` passing. Every IAM role must carry the `<boundary name>` permissions boundary. The cdk.json context key sets it app-wide, but roles CDK creates for `AwsCustomResource` miss it (aws/aws-cdk#30179) and need `PermissionsBoundary.of(construct).apply(...)`. CDK keeps S3 buckets and DynamoDB tables when a stack is deleted unless they set a removal policy, so decide for each one whether its data must outlive the stack.
+   > Merging to main deploys to production through `.github/workflows/deploy.yml`. Every change must leave `npm test`, `npx cdk synth` and `node scripts/check-role-boundaries.mjs` passing. Every IAM role must carry the `<boundary name>` permissions boundary. The cdk.json context key sets it app-wide, but roles CDK creates for `AwsCustomResource` miss it (aws/aws-cdk#30179) and need `PermissionsBoundary.of(construct).apply(...)`. CDK keeps S3 buckets and DynamoDB tables when a stack is deleted unless they set a removal policy, so decide for each one whether its data must outlive the stack. The account's organization policies may deny some Regions, services or resource types outright, such as EC2 instances, NAT gateways or load balancers, so check what the account allows before designing around a service.
 8. Write `factory.config.yaml`:
 
    ```yaml
@@ -121,6 +132,8 @@ Build the OIDC subject claim the role will trust:
 - Older repos use `repo:<owner>/<name>:ref:refs/heads/main`, unless the owner opted in to the immutable form.
 
 ## Step 6: Create the AWS side
+
+Unless the human said in step 1 that your profile is meant for these changes, don't run this step yourself. Give the human the exact commands below, filled in, to run in their own terminal with their admin profile. Wait for them to confirm, and for the role ARN, before step 7. Remind them to sign out of the admin session afterwards with `aws sso logout`.
 
 1. If the plan includes it, create the boundary and bootstrap CDK as agreed in step 2.
 2. Deploy the role, with the boundary's ARN:
@@ -153,6 +166,7 @@ Build the OIDC subject claim the role will trust:
    - If it fails at `configure-aws-credentials` with "Not authorized to perform sts:AssumeRoleWithWebIdentity", the subject claim is wrong. Check the claim format from step 5, update the stack, and rerun the workflow with `gh run rerun <run-id> --failed`.
    - If `cdk deploy` fails to assume a `cdk-*` role, check the qualifier and bootstrap Region.
    - If it fails creating a role with an access-denied error, that role is missing the boundary. Find it with `scripts/check-role-boundaries.mjs` and bound it.
+   - If an error says the action is denied by an explicit deny in a service control policy, the organization doesn't allow that Region, service or resource in this account. Change the app to fit, or ask the human whether the policy should change. Don't work around it. A budget action can also apply such a deny when the account goes over its monthly budget.
 
 ## Step 8: Protect main
 
