@@ -64,6 +64,26 @@ aws organizations describe-organization --profile <profile> --query "Organizatio
 
 If it returns the target account ID, stop and tell the human to deploy to a member account instead. If the account isn't in an organization, the call fails with `AWSOrganizationsNotInUseException`; tell the human the account has no organization guardrails and ask whether to go on.
 
+**A resource control policy on the account.** A member account can't read its organization's policies, so ask the human whether the account has an identity-perimeter RCP, such as AWS's `identity_perimeter_rcp.json` from the data-perimeter examples. If it limits `sts:AssumeRoleWithWebIdentity` to trusted OIDC providers or tenants, GitHub Actions can't assume the deploy role until the RCP trusts this repo's GitHub owner. In that case, add to the step 6 commands an update to the RCP, in the management account, with a statement like this:
+
+```json
+{
+  "Sid": "EnforceTrustedGitHubOwner",
+  "Effect": "Deny",
+  "Principal": "*",
+  "Action": "sts:AssumeRoleWithWebIdentity",
+  "Resource": "*",
+  "Condition": {
+    "StringNotEqualsIfExists": {
+      "token.actions.githubusercontent.com:repository_owner_id": "<owner-id>"
+    },
+    "Null": { "token.actions.githubusercontent.com:repository_owner_id": "false" }
+  }
+}
+```
+
+Get `<owner-id>` with `gh api users/<owner> -q .id`. Use the immutable `repository_owner_id`, which AWS recommends for resource control policies, rather than a name in `sub`, because names can be freed and claimed by someone else. Two things are untested: that an RCP sees this key, and that it holds the user's ID for a personal account. So the first deploy in step 7 is the test. If it fails at `configure-aws-credentials` with an access-denied error after the trust policy checks out, this statement is the likely cause.
+
 **The OIDC provider.** `aws iam list-open-id-connect-providers --profile <profile>`. If one ends in `token.actions.githubusercontent.com`, set `CreateOidcProvider` to `false`, since an account can only have one. If the read-only profile can't list providers, ask the human to run this check.
 
 ## Step 3: Confirm the plan
@@ -163,7 +183,7 @@ Unless the human said in step 1 that your profile is meant for these changes, do
 
 2. Push. For a new repo, add the remote first. Then run `git push -u origin main`.
 3. Watch the first deploy: `gh run list --repo <owner>/<name> --workflow deploy.yml --limit 1`, then `gh run watch <run-id> --repo <owner>/<name>`.
-   - If it fails at `configure-aws-credentials` with "Not authorized to perform sts:AssumeRoleWithWebIdentity", the subject claim is wrong. Check the claim format from step 5, update the stack, and rerun the workflow with `gh run rerun <run-id> --failed`.
+   - If it fails at `configure-aws-credentials` with "Not authorized to perform sts:AssumeRoleWithWebIdentity", the subject claim is wrong. Check the claim format from step 5, update the stack, and rerun the workflow with `gh run rerun <run-id> --failed`. If the claim is right and the account has a resource control policy, check its GitHub owner statement from step 2.
    - If `cdk deploy` fails to assume a `cdk-*` role, check the qualifier and bootstrap Region.
    - If it fails creating a role with an access-denied error, that role is missing the boundary. Find it with `scripts/check-role-boundaries.mjs` and bound it.
    - If an error says the action is denied by an explicit deny in a service control policy, the organization doesn't allow that Region, service or resource in this account. Change the app to fit, or ask the human whether the policy should change. Don't work around it. A budget action can also apply such a deny when the account goes over its monthly budget.
