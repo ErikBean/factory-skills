@@ -66,7 +66,7 @@ In Claude Code, skills in `~/.claude/skills/` take precedence over a project's s
 - An AWS deploy role that GitHub Actions assumes through OIDC, so no AWS keys are stored in GitHub. Only the repo's `main` branch can assume it, and it can only assume CDK's bootstrap roles.
 - The AWS account's permissions boundary on every role: the deploy role, and every role the app creates. The skill won't deploy to an account whose CDK bootstrap has no boundary.
 
-It shows you the plan and waits for your yes before it creates anything on GitHub or AWS.
+It won't set up an organization's management account, where organization policies don't apply. It shows you the plan and waits for your yes before it creates anything on GitHub or AWS. By default it hands you the AWS commands to run yourself with your admin profile, so the agent never holds admin credentials.
 
 After that, use the factory in the new repo. The factory opens a pull request, CI checks it, and merging it deploys to production.
 
