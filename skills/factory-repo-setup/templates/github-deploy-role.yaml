@@ -1,17 +1,35 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
   Lets GitHub Actions in one repository deploy CDK apps to this account. The role
-  trusts one OIDC subject claim and can only assume the CDK bootstrap roles.
+  trusts either the repository's main branch or its pull request workflows, and
+  can only assume the CDK bootstrap roles.
 
 Parameters:
   RoleName:
     Type: String
-    Description: Name of the deploy role, such as github-deploy-my-repo.
+    Description: Name of the role, such as github-deploy-my-repo or github-preview-my-repo.
+  Trust:
+    Type: String
+    AllowedValues: [main, pull_request]
+    Default: main
+    Description: >-
+      main for the production deploy role, which trusts only SubjectClaim.
+      pull_request for the preview role, which trusts pull request workflows
+      from the repository.
   SubjectClaim:
     Type: String
+    Default: ""
     Description: >-
-      The exact OIDC sub claim to trust, such as
-      repo:my-org@123/my-repo@456:ref:refs/heads/main.
+      With Trust main, the exact OIDC sub claim to trust, such as
+      repo:my-org@123/my-repo@456:ref:refs/heads/main. Unused for pull_request.
+  RepositoryId:
+    Type: String
+    AllowedPattern: "[0-9]+"
+    Description: The repository's immutable numeric ID, from gh api repos/OWNER/NAME -q .id.
+  RepositoryOwnerId:
+    Type: String
+    AllowedPattern: "[0-9]+"
+    Description: The owner's immutable numeric ID, from gh api repos/OWNER/NAME -q .owner.id.
   CdkQualifier:
     Type: String
     Default: hnb659fds
@@ -26,9 +44,17 @@ Parameters:
     Default: ""
     Description: A permissions boundary the account requires on new roles, if any.
 
+Rules:
+  MainNeedsSubjectClaim:
+    RuleCondition: !Equals [!Ref Trust, main]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref SubjectClaim, ""]]
+        AssertDescription: Trust main needs the SubjectClaim of the main branch.
+
 Conditions:
   CreateProvider: !Equals [!Ref CreateOidcProvider, "true"]
   HasBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  TrustsPullRequests: !Equals [!Ref Trust, pull_request]
 
 Resources:
   GitHubOidcProvider:
@@ -55,10 +81,23 @@ Resources:
                 - !Ref GitHubOidcProvider
                 - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
             Action: sts:AssumeRoleWithWebIdentity
-            Condition:
-              StringEquals:
-                "token.actions.githubusercontent.com:aud": sts.amazonaws.com
-                "token.actions.githubusercontent.com:sub": !Ref SubjectClaim
+            Condition: !If
+              # The pull request subject names no branch, and its form for
+              # repositories with immutable subject claims isn't documented, so
+              # the immutable IDs pin the repository and the wildcard accepts
+              # either form. Fork pull requests get no OIDC token.
+              - TrustsPullRequests
+              - StringEquals:
+                  "token.actions.githubusercontent.com:aud": sts.amazonaws.com
+                  "token.actions.githubusercontent.com:repository_id": !Ref RepositoryId
+                  "token.actions.githubusercontent.com:repository_owner_id": !Ref RepositoryOwnerId
+                StringLike:
+                  "token.actions.githubusercontent.com:sub": "*:pull_request"
+              - StringEquals:
+                  "token.actions.githubusercontent.com:aud": sts.amazonaws.com
+                  "token.actions.githubusercontent.com:repository_id": !Ref RepositoryId
+                  "token.actions.githubusercontent.com:repository_owner_id": !Ref RepositoryOwnerId
+                  "token.actions.githubusercontent.com:sub": !Ref SubjectClaim
       Policies:
         - PolicyName: assume-cdk-bootstrap-roles
           PolicyDocument:

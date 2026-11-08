@@ -11,7 +11,7 @@ echo "shellcheck"
 shellcheck "$templates"/*.sh scripts/*.sh tests/*.sh
 
 echo "node --check"
-node --check "$templates/check-role-boundaries.mjs"
+for f in "$templates"/*.mjs; do node --check "$f"; done
 
 echo "cfn-lint"
 cfn-lint "$templates/github-deploy-role.yaml"

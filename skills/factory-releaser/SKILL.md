@@ -28,8 +28,10 @@ Your prompt from the orchestrator gives you the change id, the branch, the resol
      - Review: the number of rounds, and any should-fix findings left open.
      - Deploy: if a workflow in `.github/workflows/` deploys on push to the default branch, say that merging this PR deploys to production.
 
+4. **Destroy `dev`.** If `commands.destroy_dev` is set and `ship.mode` is `commit` or `pr`, run `AWS_PROFILE=<dev.profile> <commands.destroy_dev>`. The pull request's preview replaces it from here. If it fails, don't retry with another profile: report it in the handoff, with the stack names to delete, and end with `done` if everything else shipped.
+
 Never force-push, and never push to the default branch.
 
 ## Hand off
 
-End with a handoff in the format your prompt gives, which is defined in `factory-orchestrator/references/handoff.md`, with `stage: ship`. In Artifacts, put the archive path, the commit SHAs and the PR URL. In Evidence, give the checks from step 1 with their results.
+End with a handoff in the format your prompt gives, which is defined in `factory-orchestrator/references/handoff.md`, with `stage: ship`. In Artifacts, put the archive path, the commit SHAs and the PR URL. In Evidence, give the checks from step 1 with their results, and the result of step 4.

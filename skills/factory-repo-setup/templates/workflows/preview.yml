@@ -1,0 +1,75 @@
+name: Preview
+
+# Deploys each pull request's preview stage to the preview account, posts its
+# URLs on the pull request, and destroys it when the pull request closes. Only
+# this workflow deploys there. Pull requests from forks get no OIDC token, so
+# both jobs skip them.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preview-${{ github.event.number }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_PREVIEW_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - run: >-
+          npx cdk deploy --all --require-approval never
+          -c stage=preview -c pr=${{ github.event.number }}
+          --outputs-file cdk-outputs.preview.json
+      - name: Post the preview's URLs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          urls="$(node scripts/stack-urls.mjs cdk-outputs.preview.json | sed 's/^/- /')"
+          {
+            echo "**Preview** for ${SHA:0:7}, in the preview account:"
+            echo
+            echo "${urls:-No Url outputs.}"
+          } > comment.md
+          gh pr comment "$PR" --edit-last --create-if-none --body-file comment.md
+
+  destroy:
+    if: github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      # The pull request's own code, so stacks it added are destroyed too.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_PREVIEW_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - run: npx cdk destroy --all --force -c stage=preview -c pr=${{ github.event.number }}

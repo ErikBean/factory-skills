@@ -21,6 +21,12 @@ commands:
   test: ""              # detected from the project when empty
   lint: ""              # run by green and ship when set
   typecheck: ""         # run by green and ship when set
+  deploy_dev: ""        # deploys the branch's dev stage; green runs it when set
+  smoke_dev: ""         # smoke-tests the deployed dev stage
+  destroy_dev: ""       # destroys the branch's dev stage; ship runs it
+
+dev:
+  profile: ""           # AWS CLI profile the dev commands run with
 
 review:
   max_rounds: 2         # review → fix loops before the human is asked
@@ -55,6 +61,12 @@ The size of each red-green cycle:
 ### `confirm.*`
 
 These are the human checkpoints. Turning `before_build` off lets the factory start without asking, but it still prints the flow it's using. Leave `before_ship` on unless the run can't reach anything shared, because ship can push and open a PR.
+
+### `commands.deploy_dev`, `commands.smoke_dev`, `commands.destroy_dev` and `dev.profile`
+
+For an app with a `dev` stage in a sandbox account, such as one `factory-repo-setup` set up. When `deploy_dev` is set, green ends by deploying the branch's `dev` stage and running `smoke_dev` against it, and review checks the result. Ship runs `destroy_dev` once the change is committed or its pull request is open, since the pull request's preview takes over from there.
+
+The commands run with `AWS_PROFILE` set to `dev.profile`, which must be a profile for the agent account, never an admin profile or one for production. `deploy_dev` needs `dev.profile`; with `deploy_dev` set and no profile, green stops with `needs-human`.
 
 ### `ship.mode`
 

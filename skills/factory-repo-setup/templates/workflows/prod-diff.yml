@@ -1,0 +1,33 @@
+name: Production diff
+
+# Shows how a pull request changes production, by comparing its prod stage
+# with the templates the last production deploy saved. It runs the pull
+# request's own code, so it gets no AWS credentials.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  prod-diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npx cdk synth --quiet -c stage=prod -o cdk.out.prod
+      - name: Download the last production templates
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run_id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow deploy.yml --branch main \
+            --status success --limit 1 --json databaseId -q '.[0].databaseId')"
+          if [ -n "$run_id" ]; then
+            gh run download "$run_id" --repo "$GITHUB_REPOSITORY" -n prod-templates -D prod-before || true
+          fi
+      - run: node scripts/diff-prod.mjs prod-before cdk.out.prod | tee -a "$GITHUB_STEP_SUMMARY"

@@ -59,16 +59,17 @@ In Claude Code, skills in `~/.claude/skills/` take precedence over a project's s
 
 [`factory-repo-setup`](skills/factory-repo-setup/SKILL.md) is the skill to invoke first. Ask for it by name to set up a new repo, or one with little in it yet:
 
-- A TypeScript AWS CDK app, OpenSpec and a `factory.config.yaml`.
+- A TypeScript AWS CDK app, OpenSpec and a `factory.config.yaml`. The app deploys as three stages: `dev` per branch in an agent account, `preview` per pull request in a preview account, and `prod` in production. `dev` and `preview` delete their data with their stacks.
 - CI that typechecks, tests and runs `cdk synth` on every pull request, and fails if any IAM role the app creates has no permissions boundary.
 - A GitHub Actions workflow that runs `cdk deploy` to production on every merge to `main`.
+- On every pull request, a preview deployed to the preview account with its URLs posted on the pull request, and destroyed when it closes. Also a diff against the last production deploy, made without AWS credentials.
 - A ruleset on `main`, so changes only land through a pull request that passed CI.
-- An AWS deploy role that GitHub Actions assumes through OIDC, so no AWS keys are stored in GitHub. Only the repo's `main` branch can assume it, and it can only assume CDK's bootstrap roles.
-- The AWS account's permissions boundary on every role: the deploy role, and every role the app creates. The skill won't deploy to an account whose CDK bootstrap has no boundary.
+- Two AWS roles that GitHub Actions assumes through OIDC, so no AWS keys are stored in GitHub. Only the repo's `main` branch can assume the production deploy role, and only its own pull requests the preview role. Each can only assume CDK's bootstrap roles.
+- Each AWS account's permissions boundary on every role: the deploy roles, and every role the app creates. The skill won't deploy to an account whose CDK bootstrap has no boundary.
 
 It won't set up an organization's management account, where organization policies don't apply. It shows you the plan and waits for your yes before it creates anything on GitHub or AWS. By default it hands you the AWS commands to run yourself with your admin profile, so the agent never holds admin credentials.
 
-After that, use the factory in the new repo. The factory opens a pull request, CI checks it, and merging it deploys to production.
+After that, use the factory in the new repo. The factory deploys and smoke-tests the branch's `dev` stage, opens a pull request and destroys `dev`. CI checks the pull request and deploys its preview, and merging it deploys to production.
 
 ## Use
 
