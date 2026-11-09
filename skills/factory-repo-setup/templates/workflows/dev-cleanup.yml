@@ -1,0 +1,23 @@
+name: Dev cleanup
+
+# Destroys the branch's dev stacks in the agent account when its pull request
+# merges or closes. It calls destroy-dev.yml from the default branch, not from
+# the pull request, because the cleanup role trusts only that workflow there.
+# OWNER/NAME is filled in at setup. Fork pull requests get no OIDC token and
+# have no dev stacks, so they're skipped.
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+
+jobs:
+  destroy-dev:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      id-token: write
+    uses: OWNER/NAME/.github/workflows/destroy-dev.yml@main
+    with:
+      branch: ${{ github.event.pull_request.head.ref }}

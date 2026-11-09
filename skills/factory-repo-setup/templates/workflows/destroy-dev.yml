@@ -1,0 +1,52 @@
+name: Destroy dev
+
+# Called by dev-cleanup.yml. Deletes every stack in the agent account tagged
+# with this repo's project, stage=dev and the branch, through the CDK
+# execution role, so buckets the stacks empty on delete are emptied. It runs
+# no code from the repo.
+on:
+  workflow_call:
+    inputs:
+      branch:
+        type: string
+        required: true
+      qualifier:
+        type: string
+        default: hnb659fds
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  destroy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_DEV_CLEANUP_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Delete the branch's dev stacks
+        env:
+          BRANCH: ${{ inputs.branch }}
+          QUALIFIER: ${{ inputs.qualifier }}
+          PROJECT: ${{ github.event.repository.name }}
+        run: |
+          # The same slug lib/stage.ts tags dev stacks with.
+          slug="$(printf '%s' "$BRANCH" | LC_ALL=C sed -E 's/[^A-Za-z0-9]+/-/g; s/^-+|-+$//g' | LC_ALL=C cut -c1-60)"
+          account="$(aws sts get-caller-identity --query Account --output text)"
+          exec_role="arn:aws:iam::${account}:role/cdk-${QUALIFIER}-cfn-exec-role-${account}-${AWS_REGION}"
+          stacks="$(aws cloudformation describe-stacks --output text --query \
+            "Stacks[?Tags[?Key=='project' && Value=='${PROJECT}'] && Tags[?Key=='stage' && Value=='dev'] && Tags[?Key=='branch' && Value=='${slug}']].StackName")"
+          if [ -z "$stacks" ]; then
+            echo "No dev stacks for branch ${BRANCH}."
+            exit 0
+          fi
+          for stack in $stacks; do
+            echo "Deleting ${stack}"
+            aws cloudformation delete-stack --stack-name "$stack" --role-arn "$exec_role"
+          done
+          for stack in $stacks; do
+            aws cloudformation wait stack-delete-complete --stack-name "$stack"
+            echo "Deleted ${stack}"
+          done

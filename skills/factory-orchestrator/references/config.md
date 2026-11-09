@@ -23,7 +23,7 @@ commands:
   typecheck: ""         # run by green and ship when set
   deploy_dev: ""        # deploys the branch's dev stage; green runs it when set
   smoke_dev: ""         # smoke-tests the deployed dev stage
-  destroy_dev: ""       # destroys the branch's dev stage; ship runs it
+  destroy_dev: ""       # destroys the branch's dev stage by hand; CI does it when a PR closes
 
 dev:
   profile: ""           # AWS CLI profile the dev commands run with
@@ -64,7 +64,7 @@ These are the human checkpoints. Turning `before_build` off lets the factory sta
 
 ### `commands.deploy_dev`, `commands.smoke_dev`, `commands.destroy_dev` and `dev.profile`
 
-For an app with a `dev` stage in a sandbox account, such as one `factory-repo-setup` set up. When `deploy_dev` is set, green ends by deploying the branch's `dev` stage and running `smoke_dev` against it, and review checks the result. Ship runs `destroy_dev` once the change is committed or its pull request is open, since the pull request's preview takes over from there.
+For an app with a `dev` stage in a sandbox account, such as one `factory-repo-setup` set up. When `deploy_dev` is set, green ends by deploying the branch's `dev` stage and running `smoke_dev` against it, and review checks the result. The `dev` stage stays up while the pull request is open, and the repo's CI destroys it when the pull request merges or closes. `destroy_dev` is for removing it by hand, such as when ship didn't open a pull request.
 
 The commands run with `AWS_PROFILE` set to `dev.profile`, which must be a profile for the agent account, never an admin profile or one for production. `deploy_dev` needs `dev.profile`; with `deploy_dev` set and no profile, green stops with `needs-human`.
 

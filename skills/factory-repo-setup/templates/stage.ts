@@ -23,6 +23,12 @@ export interface Stage {
    *   autoDeleteObjects: stage.ephemeral,
    */
   ephemeral: boolean;
+  /**
+   * For dev, the branch as it appears in stack names. Tag dev stacks with it,
+   * as Tags.of(app).add("branch", stage.branch), so the dev cleanup workflow
+   * finds them when the branch's pull request closes.
+   */
+  branch?: string;
 }
 
 export function stageFromContext(app: App): Stage {
@@ -33,7 +39,7 @@ export function stageFromContext(app: App): Stage {
     // Stack names allow letters, digits and hyphens, up to 128 characters.
     const slug = branch.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
     if (!slug) throw new Error("dev needs the branch: -c stage=dev -c branch=<branch>");
-    return { name, suffix: `-dev-${slug}`, ephemeral: true };
+    return { name, suffix: `-dev-${slug}`, ephemeral: true, branch: slug };
   }
   if (name === "preview") {
     const pr = String(app.node.tryGetContext("pr") ?? "");

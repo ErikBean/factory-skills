@@ -15,7 +15,7 @@ The app runs in three AWS accounts, as three stages of one CDK app:
 | `preview` | The preview account | CI only, for each pull request from this repo | Per pull request, such as `<name>-preview-pr12` |
 | `prod` | The production account | CI only, on every merge to `main` | `<name>` |
 
-Afterwards the flow is: the factory deploys and smoke-tests the branch's `dev` stage, then opens a PR and destroys `dev`. CI checks the PR, deploys its preview and shows what it would change in production. The human merges it, GitHub Actions runs `cdk deploy` to production, and the preview is destroyed.
+Afterwards the flow is: the factory deploys and smoke-tests the branch's `dev` stage, then opens a PR. CI checks the PR, deploys its preview and shows what it would change in production. `dev` stays up while the PR is open, for trying things. The human merges or closes it, GitHub Actions runs `cdk deploy` to production on a merge, and the preview and the branch's `dev` stacks are destroyed.
 
 This skill changes GitHub and AWS. Get the human's yes on the plan before anything outside the local machine changes.
 
@@ -32,11 +32,13 @@ This skill changes GitHub and AWS. Get the human's yes on the plan before anythi
 | Repo | `.github/workflows/deploy.yml`: the CI checks, then `cdk deploy --all` of the `prod` stage on every push to `main`, saving the templates it deployed |
 | Repo | `.github/workflows/preview.yml`: deploys each pull request's `preview` stage and posts its URLs, and destroys it when the pull request closes |
 | Repo | `.github/workflows/prod-diff.yml`: compares each pull request's `prod` stage with the last deployed templates, with no AWS credentials, using `scripts/diff-prod.mjs` |
-| Repo | `.github/aws/github-deploy-role.yaml`: the CloudFormation template for both deploy roles |
+| Repo | `.github/workflows/dev-cleanup.yml` and `destroy-dev.yml`: when a pull request closes, delete its branch's `dev` stacks in the agent account, using `destroy-dev.yml` from `main` |
+| Repo | `.github/aws/github-deploy-role.yaml`, the template for the deploy and preview roles, and `.github/aws/github-dev-cleanup-role.yaml` for the cleanup role |
 | AWS, production account | The GitHub OIDC identity provider, unless the account already has one |
 | AWS, production account | A deploy role that only this repo's `main` branch can assume, that can only assume the CDK bootstrap roles, and that carries the account's boundary |
 | AWS, preview account | The OIDC provider, if missing, and a preview role that only this repo's pull request workflows can assume, with the same limits |
-| GitHub | Repo variables `AWS_DEPLOY_ROLE_ARN`, `AWS_PREVIEW_ROLE_ARN` and `AWS_REGION` |
+| AWS, agent account | The OIDC provider, if missing, and a cleanup role that only `destroy-dev.yml` on `main` can assume, run from this repo's pull requests. It can only delete stacks tagged with this project and `stage=dev`, through CDK's execution role |
+| GitHub | Repo variables `AWS_DEPLOY_ROLE_ARN`, `AWS_PREVIEW_ROLE_ARN`, `AWS_DEV_CLEANUP_ROLE_ARN` and `AWS_REGION` |
 | GitHub | A ruleset on `main`: changes only through a pull request whose `test` check passed |
 
 The templates are in [templates/](templates/).
@@ -48,7 +50,7 @@ Ask for anything the human hasn't given you:
 - The repo owner and name. Whether the repo exists already, and if not, whether it should be private or public.
 - The Region, and the IDs of the three accounts: production, preview and the agent account. If the human has no separate preview or agent account, stop and ask how they want to run without one, since this setup assumes all three.
 - The AWS CLI profile the factory deploys `dev` with: the agent user's builder profile in the agent account, such as `agent-builder`. Never an admin profile.
-- Who will make the AWS changes in step 6. They need rights to create IAM roles and CloudFormation stacks in the production and preview accounts. If you're an agent, you should be signed in as an identity that can't do that, and the human shouldn't stay signed in as an admin while agents run. So by default you prepare the step 6 commands and the human runs them in their own terminal, with their own admin profile. Only run them yourself if the human says the profile you have is meant for this.
+- Who will make the AWS changes in step 6. They need rights to create IAM roles and CloudFormation stacks in all three accounts. If you're an agent, you should be signed in as an identity that can't do that, and the human shouldn't stay signed in as an admin while agents run. So by default you prepare the step 6 commands and the human runs them in their own terminal, with their own admin profile. Only run them yourself if the human says the profile you have is meant for this.
 - The AWS CLI profiles to use for the read-only checks in steps 1 and 2, one per account. A read-only profile, such as the agent user's read-only profile in the preview account, is enough for most of them.
 - Which agent tools to set OpenSpec up for, as `openspec init --tools` takes them.
 
@@ -58,7 +60,7 @@ If the repo exists, read it. This skill adds a CDK app at the repo root, so it f
 
 ## Step 2: Check the AWS accounts
 
-All of these are read-only. Run the boundary and management-account checks for each of the three accounts, and the OIDC provider check for the production and preview accounts.
+All of these are read-only. Run each check for each of the three accounts.
 
 **The permissions boundary.** Every role this setup creates, and every role the app's deploys create, must carry a permissions boundary that stops deploys from creating roles more powerful than intended. Read the bootstrap stack:
 
@@ -99,7 +101,7 @@ If it returns the target account ID, stop and tell the human to deploy to a memb
 
 Get `<owner-id>` with `gh api users/<owner> -q .id`. Use the immutable `repository_owner_id`, which AWS recommends for resource control policies, rather than a name in `sub`, because names can be freed and claimed by someone else. Two things are untested: that an RCP sees this key, and that it holds the user's ID for a personal account. So the first preview or deploy in step 7 is the test. If it fails at `configure-aws-credentials` with an access-denied error after the trust policy checks out, this statement is the likely cause.
 
-**The OIDC provider.** `aws iam list-open-id-connect-providers --profile <profile>`, in the production and preview accounts. Where one ends in `token.actions.githubusercontent.com`, set `CreateOidcProvider` to `false` for that account's role, since an account can only have one. If the read-only profile can't list providers, ask the human to run this check.
+**The OIDC provider.** `aws iam list-open-id-connect-providers --profile <profile>`, in each account. Where one ends in `token.actions.githubusercontent.com`, set `CreateOidcProvider` to `false` for that account's role, since an account can only have one. If the read-only profile can't list providers, ask the human to run this check.
 
 ## Step 3: Confirm the plan
 
@@ -115,10 +117,13 @@ Deploys:     every push to main runs `cdk deploy --all` of prod
 Skills:      factory stage skills copied in, pinned to factory-skills <short commit>
 Boundary:    <boundary name> on every role, checked in CI
 Auth:        GitHub OIDC; role github-deploy-<name> trusts <subject claim>;
-             role github-preview-<name> trusts this repo's pull requests
+             role github-preview-<name> trusts this repo's pull requests;
+             role github-dev-cleanup-<name> trusts only destroy-dev.yml on main
 PR checks:   test, a preview with its URLs, and the production diff
-AWS changes: create stack github-deploy-<name> in production and
-             github-preview-<name> in preview (role[, OIDC provider]),
+Cleanup:     closing a PR destroys its preview and its branch's dev stacks
+AWS changes: create stack github-deploy-<name> in production,
+             github-preview-<name> in preview and github-dev-cleanup-<name>
+             in the agent account (role[, OIDC provider]),
              run by <you | the human, in their own terminal>
              [create the boundary and bootstrap CDK in <region>]
 First run:   pushing the setup commit deploys the empty starter stack to production
@@ -153,10 +158,11 @@ Protection:  ruleset on main: pull request with a passing `test` check
    new <Name>Stack(app, "<Name>Stack", { stackName: `<name>${stage.suffix}`, stage });
    Tags.of(app).add("project", "<name>");
    Tags.of(app).add("stage", stage.name);
+   if (stage.branch) Tags.of(app).add("branch", stage.branch);
    if (stage.ephemeral) RemovalPolicies.of(app).destroy();
    ```
 
-   Add `stage: Stage` to the stack's props, so its constructs can read `stage.ephemeral`. The tags let leftovers be traced back to the repo and stage. Every command that synthesizes now needs `-c stage=...`. Then:
+   Add `stage: Stage` to the stack's props, so its constructs can read `stage.ephemeral`. The tags let leftovers be traced back to the repo and stage, and the dev cleanup workflow finds a branch's stacks by them, so every stack must carry them. The `project` tag must be the repo's name. Every command that synthesizes now needs `-c stage=...`. Then:
    - Add `@aws-cdk/cloudformation-diff` to the dev dependencies, for `scripts/diff-prod.mjs`.
    - Add these to `package.json` scripts. npm runs them with `sh`, so the branch is read when they run:
 
@@ -167,6 +173,7 @@ Protection:  ruleset on main: pull request with a passing `test` check
      ```
 
    - Add `cdk-outputs.*.json` to `.gitignore`.
+   - In `.github/workflows/dev-cleanup.yml`, replace `OWNER/NAME` with `<owner>/<name>`.
 6. **Copy in the factory's skills.** This way the repo's agents, CI, teammates and cloud sessions all run the same version of the factory, whatever is installed on their machine. Find the factory-skills checkout this skill was loaded from: resolve symlinks on this skill's folder, and the checkout is two levels up. If that folder isn't a git checkout, clone `https://github.com/ErikBean/factory-skills` into a temporary folder and use that. Then run `scripts/sync-factory-skills.sh <checkout>`. It refuses a checkout with uncommitted changes under `skills/`. If it does, tell the human and ask whether to commit them first or pin the last commit from a fresh clone.
 7. **Set up OpenSpec.** Run `openspec init --tools <tools>`. Then add to the `context` in `openspec/config.yaml`:
 
@@ -238,7 +245,23 @@ Unless the human said in step 1 that your profile is meant for these changes, do
      --region <region> --profile <preview admin profile>
    ```
 
-4. Read each role's ARN from its stack's `DeployRoleArn` output: `aws cloudformation describe-stacks --stack-name <stack> --query "Stacks[0].Outputs" --region <region> --profile <profile>`.
+4. Deploy the cleanup role with the agent account's admin profile and boundary. The agent user can't, since it has no IAM rights:
+
+   ```bash
+   aws cloudformation deploy \
+     --template-file .github/aws/github-dev-cleanup-role.yaml \
+     --stack-name github-dev-cleanup-<name> \
+     --capabilities CAPABILITY_NAMED_IAM \
+     --tags project=<name> \
+     --parameter-overrides RoleName=github-dev-cleanup-<name> Project=<name> \
+       CleanupWorkflowRef=<owner>/<name>/.github/workflows/destroy-dev.yml@refs/heads/main \
+       RepositoryId=<repo-id> RepositoryOwnerId=<owner-id> \
+       CdkQualifier=<qualifier> CreateOidcProvider=<true|false> \
+       PermissionsBoundaryArn=arn:aws:iam::<agent account>:policy/<boundary name> \
+     --region <region> --profile <agent account admin profile>
+   ```
+
+5. Read each role's ARN from its stack's outputs, `DeployRoleArn` or `CleanupRoleArn`: `aws cloudformation describe-stacks --stack-name <stack> --query "Stacks[0].Outputs" --region <region> --profile <profile>`.
 
 ## Step 7: Connect GitHub to AWS and push
 
@@ -247,6 +270,7 @@ Unless the human said in step 1 that your profile is meant for these changes, do
    ```bash
    gh variable set AWS_DEPLOY_ROLE_ARN --repo <owner>/<name> --body <deploy role arn>
    gh variable set AWS_PREVIEW_ROLE_ARN --repo <owner>/<name> --body <preview role arn>
+   gh variable set AWS_DEV_CLEANUP_ROLE_ARN --repo <owner>/<name> --body <cleanup role arn>
    gh variable set AWS_REGION --repo <owner>/<name> --body <region>
    ```
 
@@ -257,7 +281,10 @@ Unless the human said in step 1 that your profile is meant for these changes, do
    - If it fails creating a role with an access-denied error, that role is missing the boundary. Find it with `scripts/check-role-boundaries.mjs` and bound it.
    - If an error says the action is denied by an explicit deny in a service control policy, the organization doesn't allow that Region, service or resource in this account. Change the app to fit, or ask the human whether the policy should change. Don't work around it. A budget action can also apply such a deny when the account goes over its monthly budget.
 
-4. **Check the preview.** Open a small pull request, such as a README fix, from a branch in this repo. Its `Preview` run must deploy and comment on the pull request, its `Production diff` run must show no changes, and closing it must destroy the preview. This is the first test of the preview role's trust, and of the RCP's GitHub statement if the account has one. If the preview fails at `configure-aws-credentials`, check the IDs and the RCP as above.
+4. **Check the pull request path.** Make a branch with a small change, such as a README fix, and deploy its `dev` stage with `AWS_PROFILE=<dev profile> npm run dev:deploy`. Open a pull request from it.
+   - Its `Preview` run must deploy and comment on the pull request, and its `Production diff` run must show no changes.
+   - Close the pull request. Its `Preview` run must destroy the preview, and its `Dev cleanup` run must delete the branch's `dev` stack. Check with `aws cloudformation describe-stacks --profile <dev profile>` that it's gone.
+   - This is the first test of the preview and cleanup roles' trust, and of the RCP's GitHub statement if the accounts have one. If either fails at `configure-aws-credentials`, check the IDs and the RCP as above. For the cleanup role, also check `CleanupWorkflowRef` against the `job_workflow_ref` the run's token carried. The cleanup role's use of that claim is untested until this run.
 
 ## Step 8: Protect main
 
@@ -301,8 +328,8 @@ Tell the human:
 
 - The repo URL.
 - The first deploy run's URL and result.
-- The two role ARNs, and the boundary each carries.
-- The test pull request's preview result.
+- The three role ARNs, and the boundary each carries.
+- The test pull request's preview and dev cleanup results.
 - The factory-skills commit the repo's skills are pinned to.
 - That `main` is protected.
 
