@@ -17,7 +17,12 @@ Your prompt from the orchestrator gives you the change id, the batch, the red st
    - Replace any stubs from red with real code.
 3. **Refactor.** With every test green, remove duplication, improve names and bring the code in line with `design.md`. Run the tests after each refactor. Don't add behavior that no test checks. If you find a gap, report it in Notes for the next stage instead of coding it.
 4. **Run the checks.** Run the full test suite, plus `commands.lint` and `commands.typecheck` if they're set. All must pass.
-5. **Tick the tasks.** In `openspec/changes/<id>/tasks.md`, change `- [ ]` to `- [x]` for the tasks in this batch, and only once step 4 passes.
+5. **Deploy and smoke-test `dev`.** Skip this if `commands.deploy_dev` isn't set, or if this batch isn't the change's last and you aren't fixing review findings. Deploys take minutes, so they run once the change is complete.
+   - If `dev.profile` is empty, stop and end with `needs-human`. Never deploy with any other profile, and never to the preview or production account.
+   - Run `AWS_PROFILE=<dev.profile> <commands.deploy_dev>`, then `AWS_PROFILE=<dev.profile> <commands.smoke_dev>`.
+   - If either fails because of your code, fix it as in step 2 and rerun step 4.
+   - If the deploy fails with expired credentials, or an explicit deny in a service control policy, a permissions boundary or a budget action, stop and end with `needs-human`, quoting the error. Don't work around a deny.
+6. **Tick the tasks.** In `openspec/changes/<id>/tasks.md`, change `- [ ]` to `- [x]` for the tasks in this batch, and only once steps 4 and 5 pass.
 
 ## If there's no red stage
 
@@ -29,4 +34,4 @@ Work through each finding. If it's a behavior bug that no test catches, write a 
 
 ## Hand off
 
-End with a handoff in the format your prompt gives, which is defined in `factory-orchestrator/references/handoff.md`, with `stage: green`. In Artifacts, list the files you changed. In Evidence, give the commands from step 4 with their results. On a review loop, list each finding with what you did about it.
+End with a handoff in the format your prompt gives, which is defined in `factory-orchestrator/references/handoff.md`, with `stage: green`. In Artifacts, list the files you changed. In Evidence, give the commands from steps 4 and 5 with their results, including the stack names and URLs the deploy printed and each smoke test line. On a review loop, list each finding with what you did about it.

@@ -19,8 +19,9 @@ Your prompt from the orchestrator gives you the change id, the base ref to diff 
    3. **Honest tests.** Look for skipped or focused tests, mocks of the unit under test, and assertions that are weaker than the red stage's version. Run `git log` to see the red commit's version.
    4. **Correctness.** Look for bugs, unhandled errors, edge cases the requirement implies, and security problems such as injection, secrets in code and missing authorization.
    5. **Design.** Does the code follow `design.md`, or explain why it doesn't?
+   6. **The `dev` deploy.** If `commands.deploy_dev` is set, the green handoff must show the branch's `dev` stage deployed and its smoke test passing after the last code change. Don't deploy it yourself. If the smoke test only checks that a URL answers, say whether it exercises what the change added.
 4. **Rank each finding.**
-   - `blocking`: a requirement isn't met, a scenario has no test, a check fails, a test is dishonest, or there's a real bug.
+   - `blocking`: a requirement isn't met, a scenario has no test, a check fails, a test is dishonest, there's a real bug, or a required `dev` deploy or smoke test is missing or failed.
    - `should-fix`: a problem that won't break the spec but will cost later, such as a missed edge case with low impact or a confusing design.
    - `nit`: style. Keep these few.
 

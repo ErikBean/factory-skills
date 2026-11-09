@@ -19,5 +19,5 @@ jobs:
       - run: npm ci
       - run: npx tsc --noEmit
       - run: npm test
-      - run: npx cdk synth --quiet
+      - run: npx cdk synth --quiet -c stage=prod
       - run: node scripts/check-role-boundaries.mjs
