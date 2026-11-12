@@ -54,6 +54,8 @@ Ask for anything the human hasn't given you:
 - The AWS CLI profiles to use for the read-only checks in steps 1 and 2, one per account. A read-only profile, such as the agent user's read-only profile in the preview account, is enough for most of them.
 - Which agent tools to set OpenSpec up for, as `openspec init --tools` takes them.
 
+The observer is on if `${XDG_CONFIG_HOME:-~/.config}/factory/observer.yaml` exists, or if the human asks you to observe the setup. See [The observer](#the-observer).
+
 Check the tools work: `gh auth status`, `aws sts get-caller-identity --profile <profile>` with each read-only profile and with the `dev` profile, `node --version` (OpenSpec needs 22.12 or later), `npx --version` and `openspec --version`. Each caller identity's account must match the account the human named for it, and the `dev` profile must be in the agent account. If one doesn't, stop.
 
 If the repo exists, read it. This skill adds a CDK app at the repo root, so it fits a repo that holds little more than a README and a `.gitignore`. If the repo already has an app, stop and ask the human how the CDK app should fit in.
@@ -128,6 +130,7 @@ AWS changes: create stack github-deploy-<name> in production,
              [create the boundary and bootstrap CDK in <region>]
 First run:   pushing the setup commit deploys the empty starter stack to production
 Protection:  ruleset on main: pull request with a passing `test` check
+Observer:    on, notes to <remote> (or: local bundle | off)
 ```
 
 ## Step 4: Scaffold the repo locally
@@ -334,3 +337,17 @@ Tell the human:
 - That `main` is protected.
 
 Then tell them the next step: run the factory in the repo, and merge its PR to deploy. The factory deploys `dev` as `<dev profile>`, so they need to be signed in with it, and not with an admin profile, while it runs.
+
+If the observer is on, run its retro after the report.
+
+## The observer
+
+The observer is a sub agent that uses the `factory-observer` skill. It takes notes on how the setup went, for whoever maintains these skills, and writes them to a knowledge bundle outside the repo. It never changes anything, and nothing it returns is a gate.
+
+The run id is `<YYYY-MM-DD>-setup-<name>`. Start every observer prompt with: "You are the observer of a factory repo setup. Use the `factory-observer` skill." Then give the mode, the run id, the repo's path and URL, and the path to the factory skills folder.
+
+- **observe.** After steps 2, 3, 4, 6, 7 and 8, spawn it with: the step, the commands you ran, or for step 6 the commands you gave the human and what they reported back, and an excerpt of what they printed, anything that failed and how you got past it, and what the human said, in their words. Leave out secrets, and the values of any credentials. Run only one observer at a time.
+- **retro.** After step 9, spawn it with your report. If it returns questions, ask the human, and tell them they can skip any question.
+- **write.** Spawn it with the human's answers. Tell the human where the notes went.
+
+If the setup stops for good partway, such as at a missing boundary in step 2, run the retro and write anyway.

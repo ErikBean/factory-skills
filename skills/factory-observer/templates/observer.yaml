@@ -1,0 +1,15 @@
+# Per-machine config for the factory observer.
+# Save as ${XDG_CONFIG_HOME:-~/.config}/factory/observer.yaml.
+# While this file exists, the factory orchestrator and factory-repo-setup run the observer.
+# Every key is optional. An empty file turns the observer on with the local bundle.
+
+# A git repo that holds an OKF bundle, such as git@github.com:<you>/research.git.
+# The observer commits to its default branch and pushes.
+# Empty: write to the local bundle at ${XDG_DATA_HOME:-~/.local/share}/factory-observer/.
+remote: ""
+
+# The bundle's folder inside the repo.
+bundle: knowledge
+
+# The topic, relative to the bundle, that factory notes go in.
+topic: projects/factory-skills
