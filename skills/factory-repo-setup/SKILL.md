@@ -148,7 +148,7 @@ Observer:    on, notes to <remote> (or: local bundle | off)
    If the account uses a custom qualifier, also add `"@aws-cdk/core:bootstrapQualifier": "<qualifier>"`.
 4. Copy these templates:
    - `templates/workflows/*.yml` to `.github/workflows/`
-   - `templates/github-deploy-role.yaml` to `.github/aws/`
+   - `templates/github-deploy-role.yaml` and `templates/github-dev-cleanup-role.yaml` to `.github/aws/`
    - `templates/stage.ts` to `lib/`
    - `templates/*.mjs` and `templates/sync-factory-skills.sh` to `scripts/`, keeping the sync script executable
 5. **Add the stages and tags.** In `bin/<name>.ts`, after the app is created:
