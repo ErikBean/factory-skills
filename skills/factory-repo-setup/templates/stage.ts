@@ -29,11 +29,19 @@ export interface Stage {
    * finds them when the branch's pull request closes.
    */
   branch?: string;
+  /**
+   * The CDK bootstrap qualifier to deploy with, when it isn't the default. Set
+   * for preview and prod when cdk.json has a "ciQualifier" context value,
+   * because they share an account with dev and must deploy through a separate
+   * bootstrap that agents can't use. Pass it to the stack's synthesizer.
+   */
+  qualifier?: string;
 }
 
 export function stageFromContext(app: App): Stage {
   const name = app.node.tryGetContext("stage");
-  if (name === "prod") return { name, suffix: "", ephemeral: false };
+  const ciQualifier = app.node.tryGetContext("ciQualifier") || undefined;
+  if (name === "prod") return { name, suffix: "", ephemeral: false, qualifier: ciQualifier };
   if (name === "dev") {
     const branch = String(app.node.tryGetContext("branch") ?? "");
     // Stack names allow letters, digits and hyphens, up to 128 characters.
@@ -44,7 +52,7 @@ export function stageFromContext(app: App): Stage {
   if (name === "preview") {
     const pr = String(app.node.tryGetContext("pr") ?? "");
     if (!/^[0-9]+$/.test(pr)) throw new Error("preview needs the pull request number: -c stage=preview -c pr=<number>");
-    return { name, suffix: `-preview-pr${pr}`, ephemeral: true };
+    return { name, suffix: `-preview-pr${pr}`, ephemeral: true, qualifier: ciQualifier };
   }
   throw new Error("Pass the stage: -c stage=dev, preview or prod");
 }
