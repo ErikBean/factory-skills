@@ -68,7 +68,7 @@ Handoffs are claims. Check them before the next stage starts:
 
 - **spec:** run `openspec validate <id> --strict`.
 - **red:** run the test command. Every new test must fail, and its failure output must show missing behavior, not a broken test such as a syntax error or a bad import of a test helper. Tests that existed before must still pass. If it holds, commit: `test(<id>): red for <batch>`.
-- **green:** run the test command, which must pass in full. Run `git diff HEAD --stat -- <red test files>`, which must be empty. If the implementer edited a red test, reject the handoff and send it back. If the implementer says a test is wrong, take it to the human. If it holds, commit: `feat(<id>): green for <batch>`.
+- **green:** if `commands.deploy_dev` is set and this was the last batch or a review fix, the handoff's Evidence must show the `dev` deploy and smoke test passing. If not, send it back. Run the test command, which must pass in full. Run `git diff HEAD --stat -- <red test files>`, which must be empty. If the implementer edited a red test, reject the handoff and send it back. If the implementer says a test is wrong, take it to the human. If it holds, commit: `feat(<id>): green for <batch>`.
 - **review:** read the findings. You decide whether a should-fix finding goes back to green.
 - Any `blocked` or `needs-human` handoff: take it to the human with the options the stage gave.
 

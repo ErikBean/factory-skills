@@ -1,0 +1,112 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Lets GitHub Actions destroy one app's dev stacks in the agent account when a
+  pull request closes. Only the destroy-dev workflow on the default branch can
+  assume it, and it can only delete stacks tagged with the app's project and
+  stage=dev, through the CDK execution role.
+
+Parameters:
+  RoleName:
+    Type: String
+    Description: Name of the role, such as github-dev-cleanup-my-repo.
+  Project:
+    Type: String
+    Description: The app's project tag, which is the repo name.
+  CleanupWorkflowRef:
+    Type: String
+    Description: >-
+      The reusable workflow allowed to assume the role, as GitHub's
+      job_workflow_ref claim names it, such as
+      my-org/my-repo/.github/workflows/destroy-dev.yml@refs/heads/main.
+  RepositoryId:
+    Type: String
+    AllowedPattern: "[0-9]+"
+    Description: The repository's immutable numeric ID, from gh api repos/OWNER/NAME -q .id.
+  RepositoryOwnerId:
+    Type: String
+    AllowedPattern: "[0-9]+"
+    Description: The owner's immutable numeric ID, from gh api repos/OWNER/NAME -q .owner.id.
+  CdkQualifier:
+    Type: String
+    Default: hnb659fds
+    Description: The qualifier the account was bootstrapped with. hnb659fds is CDK's default.
+  CreateOidcProvider:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+    Description: false if the account already has the token.actions.githubusercontent.com provider.
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ""
+    Description: A permissions boundary the account requires on new roles, if any.
+
+Conditions:
+  CreateProvider: !Equals [!Ref CreateOidcProvider, "true"]
+  HasBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+
+Resources:
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: CreateProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList: [sts.amazonaws.com]
+      ThumbprintList: [6938fd4d98bab03faadb97b34396831e3780aea1]
+
+  CleanupRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref RoleName
+      MaxSessionDuration: 3600
+      PermissionsBoundary: !If [HasBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If
+                - CreateProvider
+                - !Ref GitHubOidcProvider
+                - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            # A pull request's workflow calls destroy-dev.yml from the default
+            # branch, so job_workflow_ref names that file at refs/heads/main
+            # whatever the pull request changed. The code that holds this role
+            # has been reviewed and merged.
+            Condition:
+              StringEquals:
+                "token.actions.githubusercontent.com:aud": sts.amazonaws.com
+                "token.actions.githubusercontent.com:repository_id": !Ref RepositoryId
+                "token.actions.githubusercontent.com:repository_owner_id": !Ref RepositoryOwnerId
+                "token.actions.githubusercontent.com:job_workflow_ref": !Ref CleanupWorkflowRef
+              StringLike:
+                "token.actions.githubusercontent.com:sub": "*:pull_request"
+      Policies:
+        - PolicyName: delete-dev-stacks
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: FindStacks
+                Effect: Allow
+                Action: cloudformation:DescribeStacks
+                Resource: "*"
+              - Sid: DeleteOnlyThisAppsDevStacks
+                Effect: Allow
+                Action: cloudformation:DeleteStack
+                Resource: !Sub arn:${AWS::Partition}:cloudformation:*:${AWS::AccountId}:stack/*
+                Condition:
+                  StringEquals:
+                    "aws:ResourceTag/project": !Ref Project
+                    "aws:ResourceTag/stage": dev
+                    "cloudformation:RoleArn": !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-${CdkQualifier}-cfn-exec-role-${AWS::AccountId}-${AWS::Region}
+              - Sid: DeleteThroughTheCdkExecutionRole
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-${CdkQualifier}-cfn-exec-role-${AWS::AccountId}-${AWS::Region}
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: cloudformation.amazonaws.com
+
+Outputs:
+  CleanupRoleArn:
+    Value: !GetAtt CleanupRole.Arn

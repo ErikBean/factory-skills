@@ -34,4 +34,10 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-      - run: npx cdk deploy --all --require-approval never
+      - run: npx cdk deploy --all --require-approval never -c stage=prod
+      # Pull requests compare their prod stage with these, without credentials.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: prod-templates
+          path: cdk.out/*.template.json
+          retention-days: 90

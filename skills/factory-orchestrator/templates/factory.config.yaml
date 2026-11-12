@@ -17,6 +17,12 @@ commands:
   test: ""
   lint: ""
   typecheck: ""
+  deploy_dev: ""
+  smoke_dev: ""
+  destroy_dev: ""
+
+dev:
+  profile: ""
 
 review:
   max_rounds: 2
