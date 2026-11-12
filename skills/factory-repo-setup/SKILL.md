@@ -48,7 +48,7 @@ The templates are in [templates/](templates/).
 Ask for anything the human hasn't given you:
 
 - The repo owner and name. Whether the repo exists already, and if not, whether it should be private or public.
-- The Region, and the IDs of the three accounts: production, preview and the agent account. If the human has no separate preview or agent account, stop and ask how they want to run without one, since this setup assumes all three.
+- The Region, and the IDs of the three accounts: production, preview and the agent account. If stages have to share an account, such as all three in one account while the organization can't hold more, that works with one condition. The shared account needs a second CDK bootstrap with its own qualifier, used for `preview` and `prod`, whose roles the agent's builder role can't assume. Otherwise an agent could deploy to production from its machine. Note which stages share an account and the second bootstrap's qualifier, such as `ci`.
 - The AWS CLI profile the factory deploys `dev` with: the agent user's builder profile in the agent account, such as `agent-builder`. Never an admin profile.
 - Who will make the AWS changes in step 6. They need rights to create IAM roles and CloudFormation stacks in all three accounts. If you're an agent, you should be signed in as an identity that can't do that, and the human shouldn't stay signed in as an admin while agents run. So by default you prepare the step 6 commands and the human runs them in their own terminal, with their own admin profile. Only run them yourself if the human says the profile you have is meant for this.
 - The AWS CLI profiles to use for the read-only checks in steps 1 and 2, one per account. A read-only profile, such as the agent user's read-only profile in the preview account, is enough for most of them.
@@ -75,13 +75,15 @@ aws cloudformation describe-stacks --stack-name CDKToolkit --region <region> --p
 - **Bootstrapped with no boundary, or with the boundary on the execution role only:** every deploy from `main` can do anything the bootstrap roles can, which by default is `AdministratorAccess`. Stop and tell the human. The account needs a boundary policy and a re-bootstrap with `--custom-permissions-boundary <name> --apply-permissions-boundary-to-all-roles` before this repo deploys to it. Narrowing `--cloudformation-execution-policies` instead isn't enough, because a deploy can still create a role with no boundary.
 - **Not bootstrapped:** ask whether code elsewhere owns this account's setup, such as an account bootstrap repo. If it does, the bootstrap belongs there, so stop. If not, add to the plan: create a boundary policy, starting from CDK's example (`cdk bootstrap --show-template` contains it), then bootstrap with `--custom-permissions-boundary <name> --apply-permissions-boundary-to-all-roles`. Never bootstrap with CDK's defaults.
 
+**A second bootstrap where stages share an account.** If `preview` or `prod` shares an account with `dev`, read its second bootstrap stack too, such as `CDKToolkit-ci`, the same way. It must carry the same boundary on all roles. If it's missing, stop: the bootstrap belongs with the account's setup code, or in the plan as above, with `--qualifier <ci qualifier> --toolkit-stack-name CDKToolkit-<ci qualifier>`.
+
 **Not the management account.** Service control policies, resource control policies and budget actions don't restrict an organization's management account, so a repo that deploys there runs without those guardrails. Check:
 
 ```bash
 aws organizations describe-organization --profile <profile> --query "Organization.MasterAccountId"
 ```
 
-If it returns the target account ID, stop and tell the human to deploy to a member account instead. If the account isn't in an organization, the call fails with `AWSOrganizationsNotInUseException`; tell the human the account has no organization guardrails and ask whether to go on.
+If it returns the target account ID, tell the human that SCPs, RCPs and budget actions won't protect this repo there, and that `PowerUserAccess` allows changing Identity Center, budgets and CloudTrail, which live in that account. Ask them to confirm three things: they've chosen the management account on purpose, the agent's builder role is denied those changes, and the agent user is separate from their own. Stop unless they confirm all three. Otherwise, deploy to a member account instead. If the account isn't in an organization, the call fails with `AWSOrganizationsNotInUseException`; tell the human the account has no organization guardrails and ask whether to go on.
 
 **A resource control policy on the account.** A member account can't read its organization's policies, so ask the human whether the account has an identity-perimeter RCP, such as AWS's `identity_perimeter_rcp.json` from the data-perimeter examples. If it limits `sts:AssumeRoleWithWebIdentity` to trusted OIDC providers or tenants, GitHub Actions can't assume the deploy or preview role until the RCP trusts this repo's GitHub owner. In that case, add to the step 6 commands an update to the RCP, in the management account, with a statement like this:
 
@@ -145,7 +147,7 @@ Observer:    on, notes to <remote> (or: local bundle | off)
    "@aws-cdk/core:permissionsBoundary": { "name": "<boundary name>" }
    ```
 
-   If the account uses a custom qualifier, also add `"@aws-cdk/core:bootstrapQualifier": "<qualifier>"`.
+   If the account uses a custom qualifier, also add `"@aws-cdk/core:bootstrapQualifier": "<qualifier>"`. If `preview` and `prod` share an account with `dev`, also add `"ciQualifier": "<second bootstrap's qualifier>"`, which `lib/stage.ts` gives those two stages.
 4. Copy these templates:
    - `templates/workflows/*.yml` to `.github/workflows/`
    - `templates/github-deploy-role.yaml` and `templates/github-dev-cleanup-role.yaml` to `.github/aws/`
@@ -154,11 +156,15 @@ Observer:    on, notes to <remote> (or: local bundle | off)
 5. **Add the stages and tags.** In `bin/<name>.ts`, after the app is created:
 
    ```ts
-   import { App, RemovalPolicies, Tags } from "aws-cdk-lib";
+   import { App, DefaultStackSynthesizer, RemovalPolicies, Tags } from "aws-cdk-lib";
    import { stageFromContext } from "../lib/stage";
 
    const stage = stageFromContext(app);
-   new <Name>Stack(app, "<Name>Stack", { stackName: `<name>${stage.suffix}`, stage });
+   new <Name>Stack(app, "<Name>Stack", {
+     stackName: `<name>${stage.suffix}`,
+     stage,
+     ...(stage.qualifier && { synthesizer: new DefaultStackSynthesizer({ qualifier: stage.qualifier }) }),
+   });
    Tags.of(app).add("project", "<name>");
    Tags.of(app).add("stage", stage.name);
    if (stage.branch) Tags.of(app).add("branch", stage.branch);
@@ -218,6 +224,8 @@ The preview role needs no subject claim: it trusts any subject ending in `:pull_
 Unless the human said in step 1 that your profile is meant for these changes, don't run this step yourself. Give the human the exact commands below, filled in, to run in their own terminal with their admin profile. Wait for them to confirm, and for the role ARN, before step 7. Remind them to sign out of the admin session afterwards with `aws sso logout`.
 
 1. If the plan includes it, create the boundary and bootstrap CDK as agreed in step 2.
+
+Where stages share an account, the roles in it share one OIDC provider: set `CreateOidcProvider=true` for the first role you deploy there and `false` for the others. The deploy and preview roles take the second bootstrap's qualifier as `CdkQualifier`, and the cleanup role takes the default one, since it deletes `dev` stacks.
 2. Deploy the production deploy role, with the production account's admin profile and boundary:
 
    ```bash
