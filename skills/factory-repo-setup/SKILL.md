@@ -19,6 +19,8 @@ Afterwards the flow is: the factory deploys and smoke-tests the branch's `dev` s
 
 This skill changes GitHub and AWS. Get the human's yes on the plan before anything outside the local machine changes.
 
+Agents should hold neither admin credential. By default you prepare the admin changes, on AWS in step 6 and on GitHub in steps 5 and 7, and the human runs them in their own terminal. You push and open pull requests with the agents' own GitHub access, such as a GitHub App installed on only the repos agents work on.
+
 ## What it sets up
 
 | Where | What |
@@ -38,6 +40,7 @@ This skill changes GitHub and AWS. Get the human's yes on the plan before anythi
 | AWS, production account | A deploy role that only this repo's `main` branch can assume, that can only assume the CDK bootstrap roles, and that carries the account's boundary |
 | AWS, preview account | The OIDC provider, if missing, and a preview role that only this repo's pull request workflows can assume, with the same limits |
 | AWS, agent account | The OIDC provider, if missing, and a cleanup role that only `destroy-dev.yml` on `main` can assume, run from this repo's pull requests. It can only delete stacks tagged with this project and `stage=dev`, through CDK's execution role |
+| GitHub | The repo added to the agents' GitHub App installation, if agents use one |
 | GitHub | Repo variables `AWS_DEPLOY_ROLE_ARN`, `AWS_PREVIEW_ROLE_ARN`, `AWS_DEV_CLEANUP_ROLE_ARN` and `AWS_REGION` |
 | GitHub | A ruleset on `main`: changes only through a pull request whose `test` check passed |
 
@@ -52,11 +55,12 @@ Ask for anything the human hasn't given you:
 - The AWS CLI profile the factory deploys `dev` with: the agent user's builder profile in the agent account, such as `agent-builder`. Never an admin profile.
 - Who will make the AWS changes in step 6. They need rights to create IAM roles and CloudFormation stacks in all three accounts. If you're an agent, you should be signed in as an identity that can't do that, and the human shouldn't stay signed in as an admin while agents run. So by default you prepare the step 6 commands and the human runs them in their own terminal, with their own admin profile. Only run them yourself if the human says the profile you have is meant for this.
 - The AWS CLI profiles to use for the read-only checks in steps 1 and 2, one per account. A read-only profile, such as the agent user's read-only profile in the preview account, is enough for most of them.
+- How agents reach GitHub, and who makes the GitHub admin changes: creating the repo, adding it to the agents' GitHub App installation if they use one, setting its variables and adding its ruleset. Agents with a GitHub App get its installation token as `GH_TOKEN`, and the app should have no Administration or Variables permission, so these changes are the human's. By default you prepare them and the human runs them in their own terminal, as for AWS. Only run them yourself if the human says your GitHub access is meant for this.
 - Which agent tools to set OpenSpec up for, as `openspec init --tools` takes them.
 
 The observer is on if `${XDG_CONFIG_HOME:-~/.config}/factory/observer.yaml` exists, or if the human asks you to observe the setup. See [The observer](#the-observer).
 
-Check the tools work: `gh auth status`, `aws sts get-caller-identity --profile <profile>` with each read-only profile and with the `dev` profile, `node --version` (OpenSpec needs 22.12 or later), `npx --version` and `openspec --version`. Each caller identity's account must match the account the human named for it, and the `dev` profile must be in the agent account. If one doesn't, stop.
+Check the tools work: `gh auth status` (with a GitHub App token it shows the app's `[bot]` account), `aws sts get-caller-identity --profile <profile>` with each read-only profile and with the `dev` profile, `node --version` (OpenSpec needs 22.12 or later), `npx --version` and `openspec --version`. Each caller identity's account must match the account the human named for it, and the `dev` profile must be in the agent account. If one doesn't, stop.
 
 If the repo exists, read it. This skill adds a CDK app at the repo root, so it fits a repo that holds little more than a README and a `.gitignore`. If the repo already has an app, stop and ask the human how the CDK app should fit in.
 
@@ -120,6 +124,8 @@ Stages:      dev per branch in <agent account>, deployed by the factory as <dev 
 Deploys:     every push to main runs `cdk deploy --all` of prod
 Skills:      factory stage skills copied in, pinned to factory-skills <short commit>
 Boundary:    <boundary name> on every role, checked in CI
+GitHub:      admin changes (repo, app installation, variables, ruleset) run by
+             <you | the human, in their own terminal>; agents push over HTTPS as <agent app | ...>
 Auth:        GitHub OIDC; role github-deploy-<name> trusts <subject claim>;
              role github-preview-<name> trusts this repo's pull requests;
              role github-dev-cleanup-<name> trusts only destroy-dev.yml on main
@@ -130,8 +136,8 @@ AWS changes: create stack github-deploy-<name> in production,
              in the agent account (role[, OIDC provider]),
              run by <you | the human, in their own terminal>
              [create the boundary and bootstrap CDK in <region>]
-First run:   pushing the setup commit deploys the empty starter stack to production
-Protection:  ruleset on main: pull request with a passing `test` check
+Protection:  ruleset on main: pull request with a passing `test` check, added before the first push
+First run:   the setup goes in as a pull request; merging it deploys the starter stack to production
 Observer:    on, notes to <remote> (or: local bundle | off)
 ```
 
@@ -205,12 +211,15 @@ Observer:    on, notes to <remote> (or: local bundle | off)
 10. Run `npm test`, `npx tsc --noEmit`, `npx cdk synth --quiet -c stage=prod` and `node scripts/check-role-boundaries.mjs`. All must pass before you go on. Also check that `npx cdk synth --quiet -c stage=dev -c branch=main` and `-c stage=preview -c pr=1` synthesize.
 11. Commit: `Set up CDK app, OpenSpec and deploy-on-merge`.
 
-## Step 5: Get the repo's IDs, without pushing
+## Step 5: Create the repo and get its IDs, without pushing
 
-- **New repo:** run `gh repo create <owner>/<name> --<private|public>`.
-- **Existing repo:** it's already there.
+Unless the human said in step 1 that your GitHub access is meant for admin changes, give them these commands, filled in, to run in their own terminal, and wait for them to confirm.
 
-Don't push yet. Pushing to `main` starts a deploy, and the deploy role doesn't exist yet.
+- **New repo:** `gh repo create <owner>/<name> --<private|public> --add-readme`. The README gives `main` a first commit, so the setup can go in as a pull request once the ruleset is on.
+- **Existing repo:** it's already there. If `main` has no commits yet, add a README to it first.
+- **If agents use a GitHub App:** add the repo to the app's installation, under the account's **Settings → Applications → Installed GitHub Apps → Configure → Repository access**. Then check from your session that the app can see it: `gh api /installation/repositories -q '.repositories[].full_name'`.
+
+Don't push yet. The deploy role doesn't exist yet.
 
 Get the IDs with `gh api repos/<owner>/<name> -q '.id, .owner.id, .created_at'`. Both roles trust the immutable repository and owner IDs.
 
@@ -274,7 +283,9 @@ Where stages share an account, the roles in it share one OIDC provider: set `Cre
 
 5. Read each role's ARN from its stack's outputs, `DeployRoleArn` or `CleanupRoleArn`: `aws cloudformation describe-stacks --stack-name <stack> --query "Stacks[0].Outputs" --region <region> --profile <profile>`.
 
-## Step 7: Connect GitHub to AWS and push
+## Step 7: Connect GitHub to AWS and protect main
+
+Unless the human said in step 1 that your GitHub access is meant for admin changes, give them these commands, filled in, to run in their own terminal. Wait for them to confirm.
 
 1. Set the repo variables. They aren't secrets.
 
@@ -285,53 +296,57 @@ Where stages share an account, the roles in it share one OIDC provider: set `Cre
    gh variable set AWS_REGION --repo <owner>/<name> --body <region>
    ```
 
-2. Push. For a new repo, add the remote first. Then run `git push -u origin main`.
-3. Watch the first deploy: `gh run list --repo <owner>/<name> --workflow deploy.yml --limit 1`, then `gh run watch <run-id> --repo <owner>/<name>`.
-   - If it fails at `configure-aws-credentials` with "Not authorized to perform sts:AssumeRoleWithWebIdentity", the subject claim or an ID is wrong. Check the claim format from step 5, update the stack, and rerun the workflow with `gh run rerun <run-id> --failed`. If the claim is right and the account has a resource control policy, check its GitHub owner statement from step 2.
-   - If `cdk deploy` fails to assume a `cdk-*` role, check the qualifier and bootstrap Region.
-   - If it fails creating a role with an access-denied error, that role is missing the boundary. Find it with `scripts/check-role-boundaries.mjs` and bound it.
-   - If an error says the action is denied by an explicit deny in a service control policy, the organization doesn't allow that Region, service or resource in this account. Change the app to fit, or ask the human whether the policy should change. Don't work around it. A budget action can also apply such a deny when the account goes over its monthly budget.
+2. Add a ruleset so that changes reach `main` only through a pull request whose `test` check has passed. This is required, and it goes on before anything is pushed: without it, a direct push or a failing PR can deploy to production. Leave the agents' GitHub App off its bypass list. An actor allowed to bypass "for pull requests only" can still merge its own pull request past the rules.
 
-4. **Check the pull request path.** Make a branch with a small change, such as a README fix, and deploy its `dev` stage with `AWS_PROFILE=<dev profile> npm run dev:deploy`. Open a pull request from it.
-   - Its `Preview` run must deploy and comment on the pull request, and its `Production diff` run must show no changes.
-   - Close the pull request. Its `Preview` run must destroy the preview, and its `Dev cleanup` run must delete the branch's `dev` stack. Check with `aws cloudformation describe-stacks --profile <dev profile>` that it's gone.
-   - This is the first test of the preview and cleanup roles' trust, and of the RCP's GitHub statement if the accounts have one. If either fails at `configure-aws-credentials`, check the IDs and the RCP as above. For the cleanup role, also check `CleanupWorkflowRef` against the `job_workflow_ref` the run's token carried. The cleanup role's use of that claim is untested until this run.
+   ```bash
+   gh api -X POST repos/<owner>/<name>/rulesets --input - <<'JSON'
+   {
+     "name": "main",
+     "target": "branch",
+     "enforcement": "active",
+     "conditions": { "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] } },
+     "rules": [
+       { "type": "pull_request", "parameters": {
+           "required_approving_review_count": 0,
+           "dismiss_stale_reviews_on_push": false,
+           "require_code_owner_review": false,
+           "require_last_push_approval": false,
+           "required_review_thread_resolution": false } },
+       { "type": "required_status_checks", "parameters": {
+           "strict_required_status_checks_policy": false,
+           "required_status_checks": [ { "context": "test" } ] } },
+       { "type": "non_fast_forward" }
+     ]
+   }
+   JSON
+   ```
 
-## Step 8: Protect main
-
-Add a ruleset so that changes reach `main` only through a pull request whose `test` check has passed. This step is required: without it, a direct push or a failing PR can deploy to production.
-
-```bash
-gh api -X POST repos/<owner>/<name>/rulesets --input - <<'JSON'
-{
-  "name": "main",
-  "target": "branch",
-  "enforcement": "active",
-  "conditions": { "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] } },
-  "rules": [
-    { "type": "pull_request", "parameters": {
-        "required_approving_review_count": 0,
-        "dismiss_stale_reviews_on_push": false,
-        "require_code_owner_review": false,
-        "require_last_push_approval": false,
-        "required_review_thread_resolution": false } },
-    { "type": "required_status_checks", "parameters": {
-        "strict_required_status_checks_policy": false,
-        "required_status_checks": [ { "context": "test" } ] } },
-    { "type": "non_fast_forward" }
-  ]
-}
-JSON
-```
-
-Then check it took effect: `gh api repos/<owner>/<name>/rules/branches/main` must list `pull_request` and `required_status_checks`.
+3. Check it took effect: `gh api repos/<owner>/<name>/rules/branches/main` must list `pull_request` and `required_status_checks`.
 
 GitHub's free plan doesn't support rulesets on private repos, so the call fails there with "Upgrade to GitHub Pro or make this repository public". If that happens, the setup isn't finished. Stop and tell the human `main` is unprotected, and give them the options:
 
 - Make the repo public. With their yes, run `gh api -X PATCH repos/<owner>/<name> -f visibility=public`, then add the ruleset.
 - Upgrade the plan.
 
-Until it's fixed, consider disabling the deploy workflow with `gh workflow disable deploy.yml --repo <owner>/<name>`.
+Until it's fixed, don't open the setup pull request, and consider disabling the deploy workflow with `gh workflow disable deploy.yml --repo <owner>/<name>`.
+
+## Step 8: Open the setup pull request
+
+1. Point the repo at GitHub over HTTPS, so pushes use the agents' token rather than an SSH key: `git remote add origin https://github.com/<owner>/<name>.git`, or `git remote set-url origin ...` if it has one.
+2. **New repo:** build on the README commit from step 5, keeping your files: `git fetch origin main`, then `git merge --allow-unrelated-histories -X ours -m "Merge GitHub's initial commit" origin/main`.
+3. Push the setup on a branch and open a pull request: `git push -u origin HEAD:factory-setup`, then `gh pr create --base main --head factory-setup` with a body that says merging it deploys the starter stack to production.
+4. Its `test`, `Preview` and `Production diff` runs must pass. `Production diff` shows the whole stack as new, since nothing is deployed yet. If `Preview` fails at `configure-aws-credentials`, check the preview role's IDs, and the RCP's GitHub statement from step 2 if the accounts have one.
+5. Ask the human to merge it. Merging deploys to production, so it's theirs to do. The setup branch has no `dev` stage, so if its `Dev cleanup` run fails on close, that's expected.
+6. Watch the first deploy: `gh run list --repo <owner>/<name> --workflow deploy.yml --limit 1`, then `gh run watch <run-id> --repo <owner>/<name>`.
+   - If it fails at `configure-aws-credentials` with "Not authorized to perform sts:AssumeRoleWithWebIdentity", the subject claim or an ID is wrong. Check the claim format from step 5, update the stack, and rerun the workflow with `gh run rerun <run-id> --failed`. If the claim is right and the account has a resource control policy, check its GitHub owner statement from step 2.
+   - If `cdk deploy` fails to assume a `cdk-*` role, check the qualifier and bootstrap Region.
+   - If it fails creating a role with an access-denied error, that role is missing the boundary. Find it with `scripts/check-role-boundaries.mjs` and bound it.
+   - If an error says the action is denied by an explicit deny in a service control policy, the organization doesn't allow that Region, service or resource in this account. Change the app to fit, or ask the human whether the policy should change. Don't work around it. A budget action can also apply such a deny when the account goes over its monthly budget.
+
+7. **Check the pull request path.** Make a branch with a small change, such as a README fix, and deploy its `dev` stage with `AWS_PROFILE=<dev profile> npm run dev:deploy`. Open a pull request from it.
+   - Its `Preview` run must deploy and comment on the pull request, and its `Production diff` run must show no changes.
+   - Close the pull request. Its `Preview` run must destroy the preview, and its `Dev cleanup` run must delete the branch's `dev` stack. Check with `aws cloudformation describe-stacks --profile <dev profile>` that it's gone.
+   - This is the first test of the cleanup role's trust, and of a preview being destroyed. If either fails at `configure-aws-credentials`, check the IDs and the RCP as above. For the cleanup role, also check `CleanupWorkflowRef` against the `job_workflow_ref` the run's token carried. The cleanup role's use of that claim is untested until this run.
 
 ## Step 9: Report
 
@@ -354,7 +369,7 @@ The observer is a sub agent that uses the `factory-observer` skill. It takes not
 
 The run id is `<YYYY-MM-DD>-setup-<name>`. Start every observer prompt with: "You are the observer of a factory repo setup. Use the `factory-observer` skill." Then give the mode, the run id, the repo's path and URL, and the path to the factory skills folder.
 
-- **observe.** After steps 2, 3, 4, 6, 7 and 8, spawn it with: the step, the commands you ran, or for step 6 the commands you gave the human and what they reported back, and an excerpt of what they printed, anything that failed and how you got past it, and what the human said, in their words. Leave out secrets, and the values of any credentials. Run only one observer at a time.
+- **observe.** After steps 2, 3, 4, 5, 6, 7 and 8, spawn it with: the step, the commands you ran, or for step 6 the commands you gave the human and what they reported back, and an excerpt of what they printed, anything that failed and how you got past it, and what the human said, in their words. Leave out secrets, and the values of any credentials. Run only one observer at a time.
 - **retro.** After step 9, spawn it with your report. If it returns questions, ask the human, and tell them they can skip any question.
 - **write.** Spawn it with the human's answers. Tell the human where the notes went.
 
