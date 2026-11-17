@@ -45,7 +45,7 @@ There are two places to install them, and they work together:
   done
   ```
 
-- **In each project, pinned.** `factory-repo-setup` copies the stage skills into the project's `.agents/skills/`, links them from `.claude/skills/`, and records the factory-skills commit in `.agents/factory-skills.json`. CI, teammates and cloud sessions then run the version the project was built with. To move a project to a newer version, run `scripts/sync-factory-skills.sh <factory-skills checkout>` in it and commit the result.
+- **In each project, pinned.** `factory-repo-setup` copies the stage skills into the project's `.agents/skills/`, links them from `.claude/skills/`, and records the factory-skills commit in `.agents/factory-skills.json`. CI, teammates and cloud sessions then run the version the project was built with. To move a project to a newer version, run `scripts/sync-factory-skills.sh <factory-skills checkout>` in it and commit the result. So the pin doesn't go stale unnoticed, `scripts/check-factory-skills.mjs` says when a pinned skill has changed on factory-skills `main`. The project's CI runs it on every pull request as a warning that doesn't fail the build, and the orchestrator runs it before each build and shows the result in its plan.
 
 In Claude Code, skills in `~/.claude/skills/` take precedence over a project's skills with the same name. With both installed, your machine runs your linked copy and everyone else runs the pinned one.
 

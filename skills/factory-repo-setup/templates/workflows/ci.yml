@@ -21,3 +21,11 @@ jobs:
       - run: npm test
       - run: npx cdk synth --quiet -c stage=prod
       - run: node scripts/check-role-boundaries.mjs
+
+  # Warns, without failing, when the skills pinned in .agents/ are behind
+  # factory-skills.
+  factory-skills:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: node scripts/check-factory-skills.mjs
