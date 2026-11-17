@@ -25,7 +25,7 @@ Your prompt from the orchestrator gives you the change id, the branch, the resol
      - Why: from the proposal.
      - What: the requirements added, modified or removed.
      - Tests: the number of tests and the scenarios they cover.
-     - Review: the number of rounds, and any should-fix findings left open.
+     - Review: the number of rounds, and any should-fix findings left open. A finding that cites a private requirement source names no source: state what it requires as a plain requirement.
      - Deploy: if a workflow in `.github/workflows/` deploys on push to the default branch, say that merging this PR deploys to production.
 
 4. **Leave `dev` up.** Don't destroy the branch's `dev` stage. It stays up while the pull request is open, for trying things, and CI destroys it when the pull request merges or closes. With `ship.mode` `commit` or `none` there's no pull request to trigger that, so say in the handoff that the `dev` stage is still deployed and that `AWS_PROFILE=<dev.profile> <commands.destroy_dev>` removes it.

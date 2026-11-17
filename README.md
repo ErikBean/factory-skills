@@ -10,9 +10,9 @@ By default the factory uses spec-driven development with [OpenSpec](https://gith
 you ── request ──► factory-orchestrator ── shows the flow, waits for your yes
                           │
                           ▼
-   spec ──► [ red ──► green ] for each task group ──► review ──► ship
-                         ▲                              │
-                         └──── blocking findings ───────┘
+   spec ──► [ red ──► green ] for each task group ──► review ──► verify ──► ship
+                         ▲                                          │
+                         └────────── confirmed blocking findings ───┘
 ```
 
 | Stage | Agent | Skill | What it does |
@@ -20,12 +20,13 @@ you ── request ──► factory-orchestrator ── shows the flow, waits f
 | spec | `spec-writer` | [`factory-spec-writer`](skills/factory-spec-writer/SKILL.md) | Writes an OpenSpec change: proposal, spec deltas with testable scenarios, design, tasks |
 | red | `test-writer` | [`factory-test-writer`](skills/factory-test-writer/SKILL.md) | Writes one failing test per scenario and proves each fails for the right reason |
 | green | `implementer` | [`factory-implementer`](skills/factory-implementer/SKILL.md) | Makes the tests pass without touching them, refactors, ticks the tasks |
-| review | `reviewer` | [`factory-reviewer`](skills/factory-reviewer/SKILL.md) | Read-only review against the spec, the tests and the diff |
+| review | `reviewer` | [`factory-reviewer`](skills/factory-reviewer/SKILL.md) | Read-only review against the spec, the tests, the diff and any outside requirements in the config |
+| verify | `verifier` | [`factory-verifier`](skills/factory-verifier/SKILL.md) | Tries to refute one review finding; blocking findings get three verifiers and survive on two confirmations |
 | ship | `releaser` | [`factory-releaser`](skills/factory-releaser/SKILL.md) | Archives the OpenSpec change, then commits, pushes and opens a PR |
 
 Each stage runs as a sub agent with one role and one skill.
 
-The orchestrator itself is [`factory-orchestrator`](skills/factory-orchestrator/SKILL.md). It doesn't trust handoffs: after red it runs the tests to see them fail, and after green it checks they pass and that the red tests weren't edited.
+The orchestrator itself is [`factory-orchestrator`](skills/factory-orchestrator/SKILL.md). It doesn't trust handoffs: after red it runs the tests to see them fail, and after green it checks they pass and that the red tests weren't edited. Review findings are claims too, so verifiers check each one before it goes back to green, and the orchestrator counts their verdicts by fixed rules. You see what verification removed, and decide the findings the verifiers split on.
 
 By default you're asked at three points: before the build, after the spec, and before ship.
 

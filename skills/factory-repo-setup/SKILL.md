@@ -27,7 +27,7 @@ Agents should hold neither admin credential. By default you prepare the admin ch
 | --- | --- |
 | Repo | A TypeScript CDK app from `cdk init`, with Jest tests, every resource tagged with the project name and stage, and every IAM role carrying the account's permissions boundary. It takes a stage, and `dev` and `preview` delete their data with their stacks |
 | Repo | `openspec/` from `openspec init`, with project context covering deploys, the boundary and retained resources |
-| Repo | `factory.config.yaml` with the repo's test and typecheck commands, and the commands and profile for the `dev` stage |
+| Repo | `factory.config.yaml` with the repo's test and typecheck commands, the commands and profile for the `dev` stage, and the templates as a review requirement |
 | Repo | `scripts/smoke.mjs`, which requests the URLs a deploy outputs, and `scripts/stack-urls.mjs`, which finds them |
 | Repo | The factory's stage skills in `.agents/skills/`, linked from `.claude/skills/`, pinned to a factory-skills commit in `.agents/factory-skills.json` |
 | Repo | `.github/workflows/ci.yml`: typecheck, tests, `cdk synth` and a check that every synthesized IAM role has a boundary, on every pull request |
@@ -205,7 +205,15 @@ Observer:    on, notes to <remote> (or: local bundle | off)
 
    dev:
      profile: <dev profile>
+
+   review:
+     requirements:
+       - name: repo setup templates
+         kind: template
+         url: https://github.com/ErikBean/factory-skills/tree/{pinned}/skills/factory-repo-setup/templates
    ```
+
+   `{pinned}` stands for the factory-skills commit in `.agents/factory-skills.json`, so the reviewer compares a change with the templates the repo is pinned to. If the human keeps account-level requirements elsewhere, such as specs for the AWS accounts, ask whether to add them as `spec` sources. Private ones, such as personal notes, go in `factory.config.local.yaml`. Add `factory.config.local.yaml` to `.gitignore`.
 
 9. Write the README. For a new repo, replace the one from `cdk init`. For an existing repo, keep what's there and add to it. It should cover what the repo is for, the three stages and where each runs, that merges to `main` deploy to production, and how the deploy and preview roles are set up, pointing to `.github/aws/github-deploy-role.yaml`. Also say that the factory's skills are pinned in `.agents/skills/`, that CI warns when they fall behind factory-skills, and that `scripts/sync-factory-skills.sh <factory-skills checkout>` updates them.
 10. Run `npm test`, `npx tsc --noEmit`, `npx cdk synth --quiet -c stage=prod` and `node scripts/check-role-boundaries.mjs`. All must pass before you go on. Also check that `npx cdk synth --quiet -c stage=dev -c branch=main` and `-c stage=preview -c pr=1` synthesize.
