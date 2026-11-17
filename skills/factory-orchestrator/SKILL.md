@@ -26,6 +26,7 @@ Run this skill in the main conversation, not in a sub agent. In many runtimes, s
    - `workflow.spec: openspec`: `openspec --version` works and the repo has an `openspec/` folder. If either is missing, tell the human and offer to run `openspec init --tools <tool>`. Don't install or initialize anything without their yes.
    - `commands.test`: if empty, detect it from the project (`package.json` scripts, `pyproject.toml`, `go.mod`, `Cargo.toml`, a `Makefile`). If you can't tell, ask.
    - Git: a clean working tree. Plan to work on a branch named `<branch_prefix><change-id>`.
+   - Pinned skills: if `scripts/check-factory-skills.mjs` exists, run `node scripts/check-factory-skills.mjs`. If it says the skills are behind, or couldn't check, put that in the plan's `Skills:` line with the changed skills. Don't sync them without the human's yes. If they say yes, run `scripts/sync-factory-skills.sh <factory-skills checkout>` and commit the result on its own before the build starts. In Claude Code, skills in `~/.claude/skills/` override the project's, so this run may already be on a newer copy. Say so if that folder holds factory skills.
    - The observer: on if `${XDG_CONFIG_HOME:-~/.config}/factory/observer.yaml` exists, or if the human asks you to observe the run. See [The observer](#the-observer).
 3. If the request is ambiguous in ways that change what gets built, list your questions now. Spec time is too late to discover the human meant something else.
 
@@ -40,6 +41,7 @@ Flow:        spec → red → green → review → ship (PR)
 TDD:         red-green, one cycle per task group; tests run with `npm test`
 Checkpoints: before build (now), after spec, before ship
 Config:      defaults (no factory.config.yaml)
+Skills:      pinned at d8c2cb1, current (or: 3 commits behind, factory-implementer changed | not pinned)
 Observer:    on, notes to git@github.com:<you>/research.git (or: local bundle | off)
 ```
 
