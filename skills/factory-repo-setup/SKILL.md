@@ -30,6 +30,8 @@ Agents should hold neither admin credential. By default you prepare the admin ch
 | Repo | `factory.config.yaml` with the repo's test and typecheck commands, the commands and profile for the `dev` stage, and the templates as a review requirement |
 | Repo | `scripts/smoke.mjs`, which requests the URLs a deploy outputs, and `scripts/stack-urls.mjs`, which finds them |
 | Repo | The factory's stage skills in `.agents/skills/`, linked from `.claude/skills/`, pinned to a factory-skills commit in `.agents/factory-skills.json` |
+| Repo | `.github/CODEOWNERS`, naming the human as owner of every file, so a pull request needs their approval |
+| Repo | `.claude/settings.json` and `.claude/hooks/block-merge.mjs`: a Claude Code hook that refuses shell commands that merge or approve a pull request or push to `main`, as a second layer behind the rulesets |
 | Repo | `.github/workflows/ci.yml`: typecheck, tests, `cdk synth` and a check that every synthesized IAM role has a boundary, on every pull request |
 | Repo | `.github/workflows/deploy.yml`: the CI checks, then `cdk deploy --all` of the `prod` stage on every push to `main`, saving the templates it deployed |
 | Repo | `.github/workflows/preview.yml`: deploys each pull request's `preview` stage and posts its URLs, and destroys it when the pull request closes |
@@ -42,7 +44,8 @@ Agents should hold neither admin credential. By default you prepare the admin ch
 | AWS, agent account | The OIDC provider, if missing, and a cleanup role that only `destroy-dev.yml` on `main` can assume, run from this repo's pull requests. It can only delete stacks tagged with this project and `stage=dev`, through CDK's execution role |
 | GitHub | The repo added to the agents' GitHub App installation, if agents use one |
 | GitHub | Repo variables `AWS_DEPLOY_ROLE_ARN`, `AWS_PREVIEW_ROLE_ARN`, `AWS_DEV_CLEANUP_ROLE_ARN` and `AWS_REGION` |
-| GitHub | A ruleset on `main`: changes only through a pull request whose `test` check passed |
+| GitHub | A ruleset on `main`: changes only through a pull request whose `test` check passed, with no bypass |
+| GitHub | A second ruleset on `main`: a pull request needs a code owner's approval of its latest push. The repo's admins can bypass it for their own pull requests, and nobody can bypass the first |
 
 The templates are in [templates/](templates/).
 
@@ -56,6 +59,7 @@ Ask for anything the human hasn't given you:
 - Who will make the AWS changes in step 6. They need rights to create IAM roles and CloudFormation stacks in all three accounts. If you're an agent, you should be signed in as an identity that can't do that, and the human shouldn't stay signed in as an admin while agents run. So by default you prepare the step 6 commands and the human runs them in their own terminal, with their own admin profile. Only run them yourself if the human says the profile you have is meant for this.
 - The AWS CLI profiles to use for the read-only checks in steps 1 and 2, one per account. A read-only profile, such as the agent user's read-only profile in the preview account, is enough for most of them.
 - How agents reach GitHub, and who makes the GitHub admin changes: creating the repo, adding it to the agents' GitHub App installation if they use one, setting its variables and adding its ruleset. Agents with a GitHub App get its installation token as `GH_TOKEN`, and the app should have no Administration or Variables permission, so these changes are the human's. By default you prepare them and the human runs them in their own terminal, as for AWS. Only run them yourself if the human says your GitHub access is meant for this.
+- The human's GitHub login, for `CODEOWNERS`. Merging deploys to production, so their approval is what lets a pull request merge. A GitHub App can't be a code owner, so agents can't approve their own pull requests.
 - Which agent tools to set OpenSpec up for, as `openspec init --tools` takes them.
 
 The observer is on if `${XDG_CONFIG_HOME:-~/.config}/factory/observer.yaml` exists, or if the human asks you to observe the setup. See [The observer](#the-observer).
@@ -136,7 +140,9 @@ AWS changes: create stack github-deploy-<name> in production,
              in the agent account (role[, OIDC provider]),
              run by <you | the human, in their own terminal>
              [create the boundary and bootstrap CDK in <region>]
-Protection:  ruleset on main: pull request with a passing `test` check, added before the first push
+Protection:  rulesets on main, added before the first push: pull request with a passing `test`
+             check; approval of the latest push by <human login> as code owner
+             (admins may bypass approval on their own PRs); a hook that blocks agent merges
 First run:   the setup goes in as a pull request; merging it deploys the starter stack to production
 Observer:    on, notes to <remote> (or: local bundle | off)
 ```
@@ -159,6 +165,8 @@ Observer:    on, notes to <remote> (or: local bundle | off)
    - `templates/github-deploy-role.yaml` and `templates/github-dev-cleanup-role.yaml` to `.github/aws/`
    - `templates/stage.ts` to `lib/`
    - `templates/*.mjs` and `templates/sync-factory-skills.sh` to `scripts/`, keeping the sync script executable
+   - `templates/CODEOWNERS` to `.github/CODEOWNERS`, replacing `OWNER` with the human's GitHub login
+   - `templates/claude/settings.json` to `.claude/settings.json`, and `templates/claude/hooks/block-merge.mjs` to `.claude/hooks/`. If the repo already has a `.claude/settings.json`, add the hook to its `hooks` instead of replacing it. If the Claude Code sandbox refuses to write under `.claude/`, give the human the copy commands to run
 5. **Add the stages and tags.** In `bin/<name>.ts`, after the app is created:
 
    ```ts
@@ -329,7 +337,31 @@ Unless the human said in step 1 that your GitHub access is meant for admin chang
    JSON
    ```
 
-3. Check it took effect: `gh api repos/<owner>/<name>/rules/branches/main` must list `pull_request` and `required_status_checks`.
+3. Add a second ruleset that requires the human's approval. The first ruleset lets anyone with write access merge a pull request once `test` passes, and the agents' GitHub App has write access, so without this an agent could merge its own pull request and deploy to production. This one needs a code owner to approve the pull request's latest push. A GitHub App can't be a code owner, so only the human's approval counts, and a push after their approval needs a new one. The human can't approve their own pull requests, so the repo's admins may bypass this ruleset, and only through a pull request. The first ruleset has no bypass, so even then `test` must pass.
+
+   ```bash
+   gh api -X POST repos/<owner>/<name>/rulesets --input - <<'JSON'
+   {
+     "name": "main-review",
+     "target": "branch",
+     "enforcement": "active",
+     "conditions": { "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] } },
+     "bypass_actors": [ { "actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "pull_request" } ],
+     "rules": [
+       { "type": "pull_request", "parameters": {
+           "required_approving_review_count": 1,
+           "dismiss_stale_reviews_on_push": true,
+           "require_code_owner_review": true,
+           "require_last_push_approval": true,
+           "required_review_thread_resolution": false } }
+     ]
+   }
+   JSON
+   ```
+
+   Actor 5 is the repository admin role in exported rulesets, but GitHub's API reference doesn't list the role IDs, so check the bypass took the admin role: `gh api repos/<owner>/<name>/rulesets --jq '.[] | select(.name == "main-review") | .id'`, then `gh api repos/<owner>/<name>/rulesets/<id> --jq .bypass_actors`. The repo's ruleset settings page should show "Repository admin" under bypass. If it shows another role, remove that entry and add the admin role in the page instead.
+
+4. Check both took effect: `gh api repos/<owner>/<name>/rules/branches/main` must list `pull_request` twice, one with `required_approving_review_count` 1, and `required_status_checks`.
 
 GitHub's free plan doesn't support rulesets on private repos, so the call fails there with "Upgrade to GitHub Pro or make this repository public". If that happens, the setup isn't finished. Stop and tell the human `main` is unprotected, and give them the options:
 
@@ -344,7 +376,7 @@ Until it's fixed, don't open the setup pull request, and consider disabling the 
 2. **New repo:** build on the README commit from step 5, keeping your files: `git fetch origin main`, then `git merge --allow-unrelated-histories -X ours -m "Merge GitHub's initial commit" origin/main`.
 3. Push the setup on a branch and open a pull request: `git push -u origin HEAD:factory-setup`, then `gh pr create --base main --head factory-setup` with a body that says merging it deploys the starter stack to production.
 4. Its `test`, `Preview` and `Production diff` runs must pass. `Production diff` shows the whole stack as new, since nothing is deployed yet. If `Preview` fails at `configure-aws-credentials`, check the preview role's IDs, and the RCP's GitHub statement from step 2 if the accounts have one.
-5. Ask the human to merge it. Merging deploys to production, so it's theirs to do. The setup branch has no `dev` stage, so if its `Dev cleanup` run fails on close, that's expected.
+5. Ask the human to approve and merge it: `gh pr review <number> --approve`, then `gh pr merge <number>`, or the buttons on the pull request. Merging deploys to production, so it's theirs to do. The merge guard hook refuses these commands from you, and the `main-review` ruleset refuses the merge without the human's approval. The setup branch has no `dev` stage, so if its `Dev cleanup` run fails on close, that's expected.
 6. Watch the first deploy: `gh run list --repo <owner>/<name> --workflow deploy.yml --limit 1`, then `gh run watch <run-id> --repo <owner>/<name>`.
    - If it fails at `configure-aws-credentials` with "Not authorized to perform sts:AssumeRoleWithWebIdentity", the subject claim or an ID is wrong. Check the claim format from step 5, update the stack, and rerun the workflow with `gh run rerun <run-id> --failed`. If the claim is right and the account has a resource control policy, check its GitHub owner statement from step 2.
    - If `cdk deploy` fails to assume a `cdk-*` role, check the qualifier and bootstrap Region.
@@ -365,7 +397,7 @@ Tell the human:
 - The three role ARNs, and the boundary each carries.
 - The test pull request's preview and dev cleanup results.
 - The factory-skills commit the repo's skills are pinned to.
-- That `main` is protected.
+- That `main` is protected: pull requests only, `test` must pass, and the human's approval is required.
 
 Then tell them the next step: run the factory in the repo, and merge its PR to deploy. The factory deploys `dev` as `<dev profile>`, so they need to be signed in with it, and not with an admin profile, while it runs.
 

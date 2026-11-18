@@ -11,7 +11,7 @@ echo "shellcheck"
 shellcheck "$templates"/*.sh scripts/*.sh tests/*.sh
 
 echo "node --check"
-for f in "$templates"/*.mjs; do node --check "$f"; done
+for f in "$templates"/*.mjs "$templates"/claude/hooks/*.mjs; do node --check "$f"; done
 
 echo "cfn-lint"
 cfn-lint "$templates"/*.yaml
