@@ -1,6 +1,6 @@
 # Factory config
 
-The orchestrator reads `factory.config.yaml` at the root of the project being built. Every key is optional. Missing keys take the defaults below, and with no file at all the factory runs on the defaults. [../templates/factory.config.yaml](../templates/factory.config.yaml) is a copy to start from.
+The orchestrator reads `factory.config.yaml` at the root of the project being built, then `factory.config.local.yaml` if it exists, and merges the second over the first. Keep the local file out of git. It is for settings that mustn't be published, such as paths to private notes. Every key is optional. Missing keys take the defaults below, and with no file at all the factory runs on the defaults. [../templates/factory.config.yaml](../templates/factory.config.yaml) is a copy to start from.
 
 ## Defaults
 
@@ -30,6 +30,9 @@ dev:
 
 review:
   max_rounds: 2         # review → fix loops before the human is asked
+  verify: true          # verifiers check blocking and should-fix findings before anyone acts on them
+  requirements: []      # outside sources the change must agree with; see below
+  checks: []            # extra commands whose output the reviewer uses as evidence
 
 ship:
   mode: pr              # pr | commit | none
@@ -67,6 +70,42 @@ These are the human checkpoints. Turning `before_build` off lets the factory sta
 For an app with a `dev` stage in a sandbox account, such as one `factory-repo-setup` set up. When `deploy_dev` is set, green ends by deploying the branch's `dev` stage and running `smoke_dev` against it, and review checks the result. The `dev` stage stays up while the pull request is open, and the repo's CI destroys it when the pull request merges or closes. `destroy_dev` is for removing it by hand, such as when ship didn't open a pull request.
 
 The commands run with `AWS_PROFILE` set to `dev.profile`, which must be a profile for the agent account, never an admin profile or one for production. `deploy_dev` needs `dev.profile`; with `deploy_dev` set and no profile, green stops with `needs-human`.
+
+### `review.verify`
+
+With `verify` on, the orchestrator spawns verifiers that try to refute each finding before it goes to the implementer or the human. Each blocking finding gets three verifiers and survives on two confirmations. Each should-fix finding gets one. Nits aren't verified. Severity can be lowered by verification but never raised. Turn it off for a quick run where review cost matters more than false findings.
+
+### `review.requirements`
+
+Sources outside the change's own OpenSpec change that it must agree with, such as specs in another repo, recorded decisions, or the templates the repo was set up from. The reviewer reads each one and reports where the change contradicts it. When sources disagree, findings list them all, ranked: the change's own spec and `spec` sources, then `decision`, then `template`, then general practice.
+
+Each entry has:
+
+- `name`: how findings refer to it.
+- `kind`: `spec`, `decision` or `template`.
+- `path` or `url`: a file or folder on disk, or a page the reviewer can fetch. In a `url`, `{pinned}` stands for the factory-skills commit in `.agents/factory-skills.json`.
+- `private`: `true` if it must not be quoted, linked or named in the repo or a pull request. Findings then state what it requires as a plain requirement. Put private entries in `factory.config.local.yaml`, so their paths aren't published either.
+
+```yaml
+review:
+  requirements:
+    - name: account specs
+      kind: spec
+      url: https://github.com/example/account-setup/tree/main/openspec/specs
+    - name: repo setup templates
+      kind: template
+      url: https://github.com/example/factory-skills/tree/{pinned}/skills/factory-repo-setup/templates
+```
+
+### `review.checks`
+
+Commands the reviewer runs in addition to the tests, lint and typecheck, whose output it treats as evidence, such as a workflow scanner. A check's warning becomes a finding only when the reviewer can say what it breaks. The commands must be installed where the factory runs.
+
+```yaml
+review:
+  checks:
+    - zizmor --offline .github/workflows
+```
 
 ### `ship.mode`
 

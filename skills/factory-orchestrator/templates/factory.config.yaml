@@ -1,4 +1,5 @@
 # Factory config. Every key is optional; these are the defaults.
+# factory.config.local.yaml, kept out of git, is merged over this file.
 # See skills/factory-orchestrator/references/config.md in factory-skills.
 
 workflow:
@@ -26,6 +27,9 @@ dev:
 
 review:
   max_rounds: 2
+  verify: true
+  requirements: []      # see references/config.md; private ones go in factory.config.local.yaml
+  checks: []
 
 ship:
   mode: pr              # pr | commit | none
