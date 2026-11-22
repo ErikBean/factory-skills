@@ -1,0 +1,4 @@
+# The human who approves and merges. The main-review ruleset requires a code
+# owner's approval, and a GitHub App can't be a code owner, so agents can't
+# approve their own pull requests. Replace OWNER with the human's GitHub login.
+* @OWNER

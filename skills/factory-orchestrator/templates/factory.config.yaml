@@ -35,3 +35,4 @@ ship:
   mode: pr              # pr | commit | none
   branch_prefix: factory/
   archive: true
+  review_queue: 3       # most factory PRs open at once; 0 means no limit

@@ -28,6 +28,7 @@ Run this skill in the main conversation, not in a sub agent. In many runtimes, s
    - `commands.test`: if empty, detect it from the project (`package.json` scripts, `pyproject.toml`, `go.mod`, `Cargo.toml`, a `Makefile`). If you can't tell, ask.
    - Git: a clean working tree. Plan to work on a branch named `<branch_prefix><change-id>`.
    - Pinned skills: if `scripts/check-factory-skills.mjs` exists, run `node scripts/check-factory-skills.mjs`. If it says the skills are behind, or couldn't check, put that in the plan's `Skills:` line with the changed skills. Don't sync them without the human's yes. If they say yes, run `scripts/sync-factory-skills.sh <factory-skills checkout>` and commit the result on its own before the build starts. In Claude Code, skills in `~/.claude/skills/` override the project's, so this run may already be on a newer copy. Say so if that folder holds factory skills.
+   - The review queue: with `ship.mode` `pr` and `ship.review_queue` above 0, count the factory's open pull requests: `gh pr list --state open --json headRefName --jq '[.[] | select(.headRefName | startswith("<branch_prefix>"))] | length'`. If the count has reached `ship.review_queue`, don't start the build. Tell the human which pull requests are waiting for their review, and that the factory starts again once they merge or close some. The human's review time is the factory's real limit, so don't offer to raise it unless they ask. If `gh` can't list pull requests, say so in the plan's `Queue:` line and go on.
    - The observer: on if `${XDG_CONFIG_HOME:-~/.config}/factory/observer.yaml` exists, or if the human asks you to observe the run. See [The observer](#the-observer).
 3. If the request is ambiguous in ways that change what gets built, list your questions now. Spec time is too late to discover the human meant something else.
 
@@ -44,6 +45,7 @@ Checkpoints: before build (now), after spec, before ship
 Config:      defaults (no factory.config.yaml)
 Review:      verified; 2 outside requirements, 1 private; checks: zizmor (or: not verified)
 Skills:      pinned at d8c2cb1, current (or: 3 commits behind, factory-implementer changed | not pinned)
+Queue:       1 of 3 factory pull requests awaiting your review (or: no limit | couldn't check)
 Observer:    on, notes to git@github.com:<you>/research.git (or: local bundle | off)
 ```
 
@@ -127,3 +129,4 @@ Run `openspec list --json` and `openspec instructions apply --change <id> --json
 - Only you talk to the human. Stage agents raise questions in their handoffs.
 - One stage agent at a time. Red and green for a batch never overlap. The observer and the verifiers are the exceptions: they change nothing in the project, so the observer can run beside a stage, and the verifiers beside each other.
 - Don't push, open a PR or archive the change until the human has approved, when `confirm.before_ship` is on.
+- Never merge or approve a pull request, and never push to the default branch. Merging is the human's. With `ship.mode` `pr`, the run ends at an open pull request. The repo's rulesets and its merge guard hook enforce this too, but don't rely on them.

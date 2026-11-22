@@ -28,7 +28,7 @@ Each stage runs as a sub agent with one role and one skill.
 
 The orchestrator itself is [`factory-orchestrator`](skills/factory-orchestrator/SKILL.md). It doesn't trust handoffs: after red it runs the tests to see them fail, and after green it checks they pass and that the red tests weren't edited. Review findings are claims too, so verifiers check each one before it goes back to green, and the orchestrator counts their verdicts by fixed rules. You see what verification removed, and decide the findings the verifiers split on.
 
-By default you're asked at three points: before the build, after the spec, and before ship.
+By default you're asked at three points: before the build, after the spec, and before ship. A run ends at an open pull request, and merging is yours. The orchestrator won't start a build while `ship.review_queue` factory pull requests, 3 by default, are waiting for your review.
 
 ## Install
 
@@ -64,7 +64,7 @@ In Claude Code, skills in `~/.claude/skills/` take precedence over a project's s
 - CI that typechecks, tests and runs `cdk synth` on every pull request, and fails if any IAM role the app creates has no permissions boundary.
 - A GitHub Actions workflow that runs `cdk deploy` to production on every merge to `main`.
 - On every pull request, a preview deployed to the preview account with its URLs posted on the pull request, and destroyed when it closes along with the branch's `dev` stacks. Also a diff against the last production deploy, made without AWS credentials.
-- A ruleset on `main`, so changes only land through a pull request that passed CI.
+- Rulesets on `main`, so changes only land through a pull request that passed CI and that you approved as its code owner. Agents can't approve their own pull requests, so only you can merge. A Claude Code hook also refuses agents' merge, approve and push-to-`main` commands, so an attempt fails fast with an explanation.
 - Three AWS roles that GitHub Actions assumes through OIDC, so no AWS keys are stored in GitHub. Only the repo's `main` branch can assume the production deploy role, and only its own pull requests the preview role; each can only assume CDK's bootstrap roles. A cleanup role in the agent account can only delete the app's `dev` stacks, and only the cleanup workflow on `main` can assume it.
 - Each AWS account's permissions boundary on every role: the deploy roles, and every role the app creates. The skill won't deploy to an account whose CDK bootstrap has no boundary.
 
